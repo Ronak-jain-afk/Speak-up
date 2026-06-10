@@ -1,4 +1,28 @@
-# plans
+# Rust
+/target/
+**/*.rs.bk
+*.swp
+*.swo
+
+# User data (generated at runtime)
+settings.json
+history.db
+*.log
+
+# Local model storage
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# plans (development docs tracked separately)
 dev-plan.md
 plan.md
 AGENTS.md

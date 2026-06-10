@@ -1,0 +1,8 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Speak Up",
+  "windows": ["*"],
+  "permissions": [
+    "core:default"
+  ]
+}
