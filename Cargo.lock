@@ -4434,6 +4434,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "cpal",
+ "crossbeam-channel",
  "device_query",
  "egui",
  "enigo",
@@ -4452,6 +4453,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "winit",
+ "x11rb",
 ]
 
 [[package]]
