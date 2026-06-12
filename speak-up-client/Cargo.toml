@@ -11,7 +11,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 egui = "0.30"
+egui-winit = "0.30"
+egui-wgpu = "0.30"
+wgpu = "23"
 winit = "0.30"
+pollster = "0.4"
+bytemuck = "1"
 cpal = "0.15"
 ringbuf = "0.4"
 enigo = "0.2"
