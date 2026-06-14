@@ -30,6 +30,7 @@ serde_json.workspace = true
 bincode.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+arboard = "3"
 keyring = "3"
 device_query = "2"
 x11rb = "0.13"
