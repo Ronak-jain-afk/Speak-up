@@ -21,6 +21,10 @@ pub async fn run_async(port: u16) {
 }
 
 pub fn run() {
+    run_with_port(9876);
+}
+
+pub fn run_with_port(port: u16) {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -30,5 +34,5 @@ pub fn run() {
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    rt.block_on(run_async(9876));
+    rt.block_on(run_async(port));
 }

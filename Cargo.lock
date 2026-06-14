@@ -4930,6 +4930,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "wgpu",
  "winit",
  "x11rb",

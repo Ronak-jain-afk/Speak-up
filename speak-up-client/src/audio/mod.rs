@@ -149,6 +149,18 @@ pub enum AudioError {
     PermissionDenied,
 }
 
+impl std::fmt::Display for AudioError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AudioError::DeviceNotFound(msg) => write!(f, "Device not found: {}", msg),
+            AudioError::StreamError(msg) => write!(f, "Stream error: {}", msg),
+            AudioError::PermissionDenied => write!(f, "Permission denied"),
+        }
+    }
+}
+
+impl std::error::Error for AudioError {}
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]

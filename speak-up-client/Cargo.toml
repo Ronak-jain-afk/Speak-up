@@ -35,4 +35,5 @@ keyring = "3"
 device_query = "2"
 x11rb = "0.13"
 speak-up-core.workspace = true
+uuid.workspace = true
 anyhow.workspace = true
