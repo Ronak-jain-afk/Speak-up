@@ -9,8 +9,9 @@ settings.json
 history.db
 *.log
 
-# Local model storage
+# Local model storage (but not the source module)
 models/
+!speak-up-backend/src/models/
 
 # OS
 .DS_Store
