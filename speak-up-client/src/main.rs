@@ -17,6 +17,8 @@ fn main() {
             speak_up_client::settings::is_first_run_cmd,
             speak_up_client::settings::close_wizard_cmd,
             speak_up_client::settings::test_microphone_cmd,
+            speak_up_client::settings::list_models_cmd,
+            speak_up_client::settings::download_model_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

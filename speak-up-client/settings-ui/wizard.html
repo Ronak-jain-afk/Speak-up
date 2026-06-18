@@ -105,7 +105,18 @@
         <label>API key</label>
         <input type="password" id="wiz_asr_key" placeholder="sk-...">
       </div>
-      <div class="desc" style="font-size:11px;">
+      <div id="wiz_model_download" style="margin-top:12px;padding:12px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;">
+        <div style="font-size:13px;font-weight:500;margin-bottom:6px;">Local Whisper Model</div>
+        <div id="wiz_model_status" style="font-size:12px;color:#888;margin-bottom:6px;">Checking...</div>
+        <button class="btn btn-secondary" id="wiz_dl_model_btn" style="display:none;font-size:12px;padding:4px 12px;" onclick="downloadModel()">Download Model (75 MB)</button>
+        <div id="wiz_dl_progress" style="display:none;margin-top:6px;">
+          <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;">
+            <div id="wiz_dl_bar" style="height:100%;width:0%;background:#0071e3;border-radius:3px;"></div>
+          </div>
+          <div id="wiz_dl_text" style="font-size:11px;color:#888;margin-top:2px;">Starting...</div>
+        </div>
+      </div>
+      <div class="desc" style="font-size:11px;margin-top:8px;">
         Your API key is stored securely in your system keychain. You can change this later in Settings.
       </div>
     </div>
@@ -265,6 +276,7 @@
     const titles = ['Welcome', 'Microphone', 'Hotkeys', 'Speech-to-Text', 'AI Cleanup', 'Done'];
     document.getElementById('step_title').textContent = titles[_currentStep];
     document.getElementById('step_counter').textContent = `Step ${_currentStep + 1} of ${TOTAL_STEPS}`;
+    if (_currentStep === 3) checkWizardModel();
     document.getElementById('wiz_prev').style.visibility = _currentStep === 0 ? 'hidden' : 'visible';
     const nextBtn = document.getElementById('wiz_next');
     if (_currentStep === TOTAL_STEPS - 1) {
@@ -288,6 +300,61 @@
     }
     _currentStep++;
     updateStep();
+  }
+
+  async function checkWizardModel() {
+    if (!invoke) return;
+    const statusEl = document.getElementById('wiz_model_status');
+    const btn = document.getElementById('wiz_dl_model_btn');
+    try {
+      const models = await invoke('list_models_cmd');
+      const tiny = models.find(m => m.name === 'whisper-tiny');
+      if (tiny && tiny.downloaded && tiny.verified) {
+        statusEl.innerHTML = '<span style="color:#34c759;">✓ Model ready</span>';
+        btn.style.display = 'none';
+      } else {
+        statusEl.innerHTML = '<span style="color:#ff9500;">Model not downloaded</span>';
+        btn.style.display = 'inline-block';
+      }
+    } catch (e) {
+      statusEl.textContent = 'Could not check model status';
+    }
+  }
+
+  async function downloadModel() {
+    const btn = document.getElementById('wiz_dl_model_btn');
+    btn.disabled = true;
+    btn.textContent = 'Downloading...';
+    document.getElementById('wiz_dl_progress').style.display = 'block';
+
+    try {
+      await invoke('download_model_cmd', { modelName: 'whisper-tiny' });
+      // Poll for completion
+      const bar = document.getElementById('wiz_dl_bar');
+      const txt = document.getElementById('wiz_dl_text');
+      for (let i = 0; i < 600; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        txt.textContent = `Waiting... (${i + 1}s)`;
+        bar.style.width = Math.min((i / 30) * 100, 90) + '%';
+        const models = await invoke('list_models_cmd');
+        const model = models.find(m => m.name === 'whisper-tiny');
+        if (model && model.downloaded && model.verified) {
+          bar.style.width = '100%';
+          txt.textContent = '✓ Model downloaded!';
+          btn.textContent = '✓ Downloaded';
+          btn.style.background = '#34c759';
+          btn.disabled = false;
+          return;
+        }
+      }
+      txt.textContent = 'Download taking longer than expected. You can continue.';
+      btn.textContent = 'Download';
+      btn.disabled = false;
+    } catch (e) {
+      document.getElementById('wiz_dl_text').textContent = 'Error: ' + e;
+      btn.textContent = 'Retry';
+      btn.disabled = false;
+    }
   }
 
   async function finishWizard() {

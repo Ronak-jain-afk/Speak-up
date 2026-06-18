@@ -222,6 +222,14 @@
   </div>
 </div>
 
+<div id="tab_models" class="tab-content">
+  <h2>Models</h2>
+  <p class="desc">Download whisper models for local speech-to-text. Place them in the models directory, or click Download below.</p>
+  <div id="model_list" style="margin-top:12px;">
+    <p style="color:#888;font-size:13px;">Loading models...</p>
+  </div>
+</div>
+
 <div class="save-bar">
   <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
   <button class="btn btn-primary" id="saveBtn" onclick="saveSettings()">Save</button>
@@ -507,9 +515,75 @@
   document.getElementById('prof_pattern').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') addProfileMapping();
   });
+  async function loadModels() {
+    const el = document.getElementById('model_list');
+    if (!invoke) { el.innerHTML = '<p style="color:#888;">Not connected</p>'; return; }
+    try {
+      const models = await invoke('list_models_cmd');
+      if (!models || models.length === 0) {
+        el.innerHTML = '<p style="color:#888;">No models available.</p>';
+        return;
+      }
+      el.innerHTML = models.map(m => {
+        const status = m.downloaded
+          ? (m.verified ? '<span style="color:#34c759;">✓ Downloaded & verified</span>' : '<span style="color:#ff9500;">⚠ Corrupted — re-download</span>')
+          : '<span style="color:#888;">Not downloaded</span>';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;">
+          <div>
+            <strong style="font-size:14px;">${m.name}</strong>
+            <div style="font-size:11px;color:#888;">${m.filename} · ${m.size_mb} MB</div>
+            <div style="font-size:12px;margin-top:2px;">${status}</div>
+          </div>
+          ${!m.downloaded ? `<button class="btn btn-primary" style="padding:4px 14px;font-size:12px;" onclick="startModelDownload('${m.name}',this)">Download</button>` : ''}
+          <div class="model-progress" id="progress_${m.name}" style="display:none;width:100%;margin-top:4px;">
+            <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;">
+              <div style="height:100%;width:0%;background:#0071e3;border-radius:3px;transition:width 0.3s;" id="progress_bar_${m.name}"></div>
+            </div>
+            <div style="font-size:11px;color:#888;margin-top:2px;" id="progress_text_${m.name}">Starting...</div>
+          </div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      el.innerHTML = '<p style="color:#e34;">Failed to load models: ' + e + '</p>';
+    }
+  }
+
+  async function startModelDownload(name, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Downloading...';
+    const progressDiv = document.getElementById('progress_' + name);
+    if (progressDiv) progressDiv.style.display = 'block';
+    try {
+      await invoke('download_model_cmd', { modelName: name });
+      // poll for completion
+      for (let i = 0; i < 300; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const models = await invoke('list_models_cmd');
+        const model = models.find(m => m.name === name);
+        if (model && model.downloaded) {
+          btn.textContent = '✓ Done';
+          btn.style.background = '#34c759';
+          const bar = document.getElementById('progress_bar_' + name);
+          if (bar) bar.style.width = '100%';
+          const txt = document.getElementById('progress_text_' + name);
+          if (txt) txt.textContent = 'Complete!';
+          return;
+        }
+        if (model && model.verified) break;
+      }
+      btn.textContent = 'Download';
+      btn.disabled = false;
+    } catch (e) {
+      btn.textContent = 'Failed';
+      const txt = document.getElementById('progress_text_' + name);
+      if (txt) txt.textContent = 'Error: ' + e;
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
     loadHistory();
+    loadModels();
   });
 </script>
 </body>

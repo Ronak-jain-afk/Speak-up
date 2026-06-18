@@ -220,6 +220,24 @@ pub fn is_first_run() -> bool {
 }
 
 #[tauri::command]
+pub fn list_models_cmd() -> Result<Vec<speak_up_core::ipc::ModelInfo>, String> {
+    let req_tx = crate::get_backend_request_tx().ok_or("Backend not connected")?;
+    let (resp_tx, resp_rx) = crossbeam_channel::bounded(1);
+    let req = crate::BackendRequest::ListModels {
+        response_tx: resp_tx,
+    };
+    req_tx.send(req).map_err(|e| format!("Failed to send request: {}", e))?;
+    resp_rx.recv().map_err(|e| format!("Failed to receive response: {}", e))?
+}
+
+#[tauri::command]
+pub fn download_model_cmd(model_name: String) -> Result<(), String> {
+    let req_tx = crate::get_backend_request_tx().ok_or("Backend not connected")?;
+    let req = crate::BackendRequest::DownloadModel { model_name };
+    req_tx.send(req).map_err(|e| format!("Failed to send request: {}", e))
+}
+
+#[tauri::command]
 pub fn test_microphone_cmd(device_id: String) -> Result<f32, String> {
     let host = cpal::default_host();
     let device = if device_id.is_empty() {

@@ -19,6 +19,8 @@ use speak_up_core::AppContext;
 type HistoryResp = crossbeam_channel::Sender<Result<(Vec<DictationEntry>, usize), String>>;
 type LastDictResp = crossbeam_channel::Sender<Result<Option<DictationEntry>, String>>;
 
+type ModelsResp = crossbeam_channel::Sender<Result<Vec<speak_up_core::ipc::ModelInfo>, String>>;
+
 pub enum BackendRequest {
     QueryHistory {
         limit: usize,
@@ -31,6 +33,12 @@ pub enum BackendRequest {
     },
     InjectText {
         text: String,
+    },
+    ListModels {
+        response_tx: ModelsResp,
+    },
+    DownloadModel {
+        model_name: String,
     },
 }
 
@@ -189,6 +197,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
 
     let mut pending_history_resp: Option<HistoryResp> = None;
     let mut pending_last_dict_resp: Option<LastDictResp> = None;
+    let mut pending_models_resp: Option<ModelsResp> = None;
 
     let mut was_muted: Option<bool> = None;
 
@@ -395,6 +404,19 @@ fn run_main_loop(cfg: MainLoopConfig) {
                         tracing::error!("Inject text from history failed: {:?}", e);
                     }
                 }
+                BackendRequest::ListModels { response_tx } => {
+                    let msg = ClientMessage::ListModels;
+                    if let Ok(data) = bincode::serialize(&msg) {
+                        let _ = backend.to_backend.send(data);
+                    }
+                    pending_models_resp = Some(response_tx);
+                }
+                BackendRequest::DownloadModel { model_name } => {
+                    let msg = ClientMessage::DownloadModel { model_name };
+                    if let Ok(data) = bincode::serialize(&msg) {
+                        let _ = backend.to_backend.send(data);
+                    }
+                }
             }
         }
 
@@ -412,6 +434,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
                     &mut last_cleaned_text,
                     &mut pending_history_resp,
                     &mut pending_last_dict_resp,
+                    &mut pending_models_resp,
                 );
             }
         }
@@ -479,6 +502,7 @@ fn handle_backend_message(
     last_cleaned_text: &mut Option<String>,
     pending_history_resp: &mut Option<HistoryResp>,
     pending_last_dict_resp: &mut Option<LastDictResp>,
+    pending_models_resp: &mut Option<ModelsResp>,
 ) {
     match msg {
         BackendMessage::SessionStarted { session_id } => {
@@ -575,6 +599,31 @@ fn handle_backend_message(
             }
             if let Some(tx) = pending_last_dict_resp.take() {
                 let _ = tx.send(Ok(entry));
+            }
+        }
+
+        BackendMessage::ModelList { models } => {
+            tracing::debug!("Received model list ({} models)", models.len());
+            if let Some(tx) = pending_models_resp.take() {
+                let _ = tx.send(Ok(models));
+            }
+        }
+
+        BackendMessage::ModelDownloadProgress { model_name, bytes_downloaded, total_bytes } => {
+            tracing::info!(
+                "Model '{}' download: {}/{} bytes ({:.0}%)",
+                model_name,
+                bytes_downloaded,
+                total_bytes,
+                if total_bytes > 0 { bytes_downloaded as f64 / total_bytes as f64 * 100.0 } else { 0.0 }
+            );
+        }
+
+        BackendMessage::ModelDownloaded { model_name, success, error } => {
+            if success {
+                tracing::info!("Model '{}' downloaded successfully", model_name);
+            } else {
+                tracing::error!("Failed to download model '{}': {:?}", model_name, error);
             }
         }
     }

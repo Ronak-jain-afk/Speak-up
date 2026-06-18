@@ -255,6 +255,82 @@ async fn handle_connection(
                 let response = BackendMessage::LastDictationResult { entry };
                 send_message(&msg_tx, &response).await;
             }
+
+            ClientMessage::ListModels => {
+                use crate::models;
+                let models: Vec<speak_up_core::ipc::ModelInfo> = models::MODELS
+                    .iter()
+                    .map(|s| speak_up_core::ipc::ModelInfo {
+                        name: s.name.to_string(),
+                        filename: s.filename.to_string(),
+                        size_mb: s.size_mb,
+                        downloaded: models::ModelDownloader::is_downloaded(s),
+                        verified: models::ModelDownloader::verify_sha256(s),
+                    })
+                    .collect();
+                let response = BackendMessage::ModelList { models };
+                send_message(&msg_tx, &response).await;
+            }
+
+            ClientMessage::DownloadModel { model_name } => {
+                use crate::models;
+                let spec = models::MODELS.iter().find(|s| s.name == model_name);
+                match spec {
+                    Some(s) => {
+                        let (progress_tx, mut progress_rx) = mpsc::channel::<models::DownloadEvent>(64);
+                        let name = s.name.to_string();
+
+                        // Start download in background
+                        tokio::spawn(async move {
+                            models::ModelDownloader::download(s, progress_tx).await;
+                        });
+
+                        // Forward progress events
+                        let tx2 = msg_tx.clone();
+                        tokio::spawn(async move {
+                            while let Some(event) = progress_rx.recv().await {
+                                let msg = match event {
+                                    models::DownloadEvent::Progress {
+                                        bytes_downloaded,
+                                        total_bytes,
+                                    } => BackendMessage::ModelDownloadProgress {
+                                        model_name: name.clone(),
+                                        bytes_downloaded,
+                                        total_bytes,
+                                    },
+                                    models::DownloadEvent::Completed { .. } => {
+                                        BackendMessage::ModelDownloaded {
+                                            model_name: name.clone(),
+                                            success: true,
+                                            error: None,
+                                        }
+                                    }
+                                    models::DownloadEvent::Error { message } => {
+                                        BackendMessage::ModelDownloaded {
+                                            model_name: name.clone(),
+                                            success: false,
+                                            error: Some(message),
+                                        }
+                                    }
+                                };
+                                if let Ok(data) = bincode::serialize(&msg) {
+                                    let _ = tx2.send(data).await;
+                                }
+                            }
+                        });
+                    }
+                    None => {
+                        let msg = BackendMessage::ModelDownloaded {
+                            model_name,
+                            success: false,
+                            error: Some("Unknown model".into()),
+                        };
+                        if let Ok(data) = bincode::serialize(&msg) {
+                            let _ = msg_tx.send(data).await;
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -12,6 +12,17 @@ pub enum ClientMessage {
     ReloadSettings,
     QueryHistory { limit: usize, offset: usize, search_term: Option<String> },
     QueryLastDictation,
+    DownloadModel { model_name: String },
+    ListModels,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub name: String,
+    pub filename: String,
+    pub size_mb: u64,
+    pub downloaded: bool,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +34,9 @@ pub enum BackendMessage {
     ProviderSwitched { provider_type: ProviderType, success: bool, error: Option<String> },
     HistoryResult { entries: Vec<DictationEntry>, total_count: usize },
     LastDictationResult { entry: Option<DictationEntry> },
+    ModelList { models: Vec<ModelInfo> },
+    ModelDownloadProgress { model_name: String, bytes_downloaded: u64, total_bytes: u64 },
+    ModelDownloaded { model_name: String, success: bool, error: Option<String> },
     Error { code: ErrorCode, message: String },
 }
 
