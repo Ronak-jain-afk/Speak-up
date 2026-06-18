@@ -46,7 +46,7 @@ pub struct ProviderConfig {
     pub settings: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ProviderType {
     LocalWhisper,
     OpenAIWhisper,

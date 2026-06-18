@@ -161,6 +161,40 @@ impl std::fmt::Display for AudioError {
 
 impl std::error::Error for AudioError {}
 
+pub fn set_system_audio_mute(muted: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    { linux::set_system_audio_mute(muted) }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = muted;
+        Err("Auto-mute not yet implemented for macOS".into())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = muted;
+        Err("Auto-mute not yet implemented for Windows".into())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    { Err("Auto-mute not supported on this platform".into()) }
+}
+
+pub fn get_sink_mute_state() -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    { linux::get_sink_mute_state() }
+
+    #[cfg(target_os = "macos")]
+    { Ok(false) }
+
+    #[cfg(target_os = "windows")]
+    { Ok(false) }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    { Ok(false) }
+}
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]

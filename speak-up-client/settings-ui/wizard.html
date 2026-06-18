@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Speak Up</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f5f7; color: #1d1d1f; font-size: 14px; line-height: 1.5;
+      display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    }
+    .header { padding: 28px 28px 0; text-align: center; }
+    .header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+    .header .step { font-size: 12px; color: #888; margin-top: 4px; }
+    .content { flex: 1; padding: 24px 28px; overflow-y: auto; }
+    .footer {
+      padding: 14px 28px; border-top: 1px solid #e0e0e0;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .step-dots { display: flex; gap: 6px; }
+    .step-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #d0d0d0;
+    }
+    .step-dot.active { background: #0071e3; }
+    .step-dot.done { background: #34c759; }
+    .btn {
+      padding: 8px 20px; border: none; border-radius: 8px; font-size: 13px;
+      font-weight: 500; cursor: pointer; transition: background 0.15s;
+    }
+    .btn-primary { background: #0071e3; color: #fff; }
+    .btn-primary:hover { background: #0060c0; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:hover { background: #d0d0d0; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .field { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+    .field label { font-size: 13px; color: #333; }
+    .field select, .field input[type="text"], .field input[type="password"] {
+      font-size: 13px; padding: 5px 10px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff; width: 200px; outline: none;
+    }
+    .field select:focus, .field input:focus { border-color: #0071e3; box-shadow: 0 0 0 2px rgba(0,113,227,0.2); }
+    .desc { font-size: 13px; color: #666; margin-bottom: 12px; line-height: 1.6; }
+    .welcome-icon { font-size: 48px; text-align: center; margin-bottom: 12px; }
+    .hotkey-input { font-size: 18px; text-align: center; padding: 12px !important; width: 220px !important; font-family: monospace; }
+    .step-page { display: none; }
+    .step-page.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 id="step_title">Welcome</h1>
+    <div class="step" id="step_counter">Step 1 of 6</div>
+  </div>
+
+  <div class="content">
+    <div class="step-page active" id="page_0">
+      <div class="welcome-icon">🎙️</div>
+      <div class="desc" style="text-align:center;">
+        <strong>Welcome to Speak Up!</strong><br><br>
+        This quick wizard will help you get set up in less than a minute.<br>
+        You'll choose your microphone, configure hotkeys, and set up speech recognition.
+      </div>
+    </div>
+
+    <div class="step-page" id="page_1">
+      <div class="desc">Select your microphone. Speak to test the level.</div>
+      <div class="field">
+        <label>Microphone</label>
+        <select id="wiz_mic_device"><option value="">Default</option></select>
+      </div>
+      <div style="margin-top:16px;padding:12px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;text-align:center;">
+        <div style="font-size:12px;color:#888;margin-bottom:8px;">Microphone level</div>
+        <div style="height:20px;background:#e0e0e0;border-radius:10px;overflow:hidden;">
+          <div id="wiz_mic_level" style="height:100%;width:0%;background:#0071e3;border-radius:10px;transition:width 0.5s;"></div>
+        </div>
+        <div style="margin-top:4px;font-size:11px;color:#888;" id="wiz_mic_label">Click "Test" to check your microphone</div>
+        <div style="margin-top:8px;">
+          <button class="btn btn-secondary" id="wiz_mic_test_btn" onclick="toggleMicTest()">Test Microphone</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step-page" id="page_2">
+      <div class="desc">Press the key combination you want to use for push-to-talk.</div>
+      <div class="field" style="justify-content:center;">
+        <input type="text" id="wiz_hotkey" class="hotkey-input" value="Ctrl+Shift+Space" readonly placeholder="Press keys...">
+      </div>
+      <div class="desc" style="text-align:center;font-size:11px;">
+        Click the field above, then press your desired hotkey combination.
+      </div>
+    </div>
+
+    <div class="step-page" id="page_3">
+      <div class="desc">Choose how to convert speech to text.</div>
+      <div class="field">
+        <label>Provider</label>
+        <select id="wiz_asr_type">
+          <option value="">Local (coming soon)</option>
+          <option value="OpenAIWhisper">OpenAI Whisper API</option>
+        </select>
+      </div>
+      <div class="field" id="wiz_asr_key_field" style="display:none;">
+        <label>API key</label>
+        <input type="password" id="wiz_asr_key" placeholder="sk-...">
+      </div>
+      <div class="desc" style="font-size:11px;">
+        Your API key is stored securely in your system keychain. You can change this later in Settings.
+      </div>
+    </div>
+
+    <div class="step-page" id="page_4">
+      <div class="desc">Optionally, choose an AI to clean up your transcripts (removes filler words, adds punctuation).</div>
+      <div class="field">
+        <label>Cleaner</label>
+        <select id="wiz_cleaner_type">
+          <option value="">None (raw transcript)</option>
+          <option value="LocalLLM">Local (basic rules)</option>
+          <option value="OpenAICleaner">OpenAI</option>
+          <option value="AnthropicCleaner">Anthropic</option>
+        </select>
+      </div>
+      <div class="field" id="wiz_cleaner_key_field" style="display:none;">
+        <label>API key</label>
+        <input type="password" id="wiz_cleaner_key" placeholder="sk-...">
+      </div>
+    </div>
+
+    <div class="step-page" id="page_5">
+      <div class="welcome-icon">✅</div>
+      <div class="desc" style="text-align:center;">
+        <strong>You're all set!</strong><br><br>
+        Press <strong id="done_hotkey">Ctrl+Shift+Space</strong> to start dictating.<br>
+        Open the system tray and click "Settings" to customize further.<br><br>
+        <span style="font-size:12px;color:#888;">Need help? Check the documentation in the tray menu.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="step-dots" id="step_dots"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="wiz_prev" onclick="prevStep()" style="visibility:hidden;">Back</button>
+      <button class="btn btn-primary" id="wiz_next" onclick="nextStep()">Next</button>
+    </div>
+  </div>
+
+<script>
+  let invoke = null;
+  let _currentStep = 0;
+  const TOTAL_STEPS = 6;
+  let _micTesting = false;
+
+  function findInvoke() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function')
+      return window.__TAURI__.core.invoke;
+    if (window.__TAURI__ && typeof window.__TAURI__.invoke === 'function')
+      return window.__TAURI__.invoke;
+    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function')
+      return window.__TAURI_INTERNALS__.invoke;
+    return null;
+  }
+
+  function boot() {
+    const fn = findInvoke();
+    if (fn) {
+      invoke = fn;
+      for (let i = 0; i < TOTAL_STEPS; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'step-dot';
+        document.getElementById('step_dots').appendChild(dot);
+      }
+      updateStep();
+      setupHotkeyCapture();
+      document.getElementById('wiz_asr_type').addEventListener('change', () => toggleKeyField('wiz_asr'));
+      document.getElementById('wiz_cleaner_type').addEventListener('change', () => toggleKeyField('wiz_cleaner'));
+      loadDevices();
+    } else {
+      setTimeout(boot, 50);
+    }
+  }
+
+  boot();
+
+  function loadDevices() {
+    if (!invoke) return;
+    invoke('get_audio_devices_cmd').then(devices => {
+      const sel = document.getElementById('wiz_mic_device');
+      sel.innerHTML = '<option value="">Default</option>';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id; opt.textContent = d.name;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  async function toggleMicTest() {
+    if (!invoke) { alert('Tauri bridge not ready yet. Please wait a moment.'); return; }
+    const btn = document.getElementById('wiz_mic_test_btn');
+    if (_micTesting) return;
+    _micTesting = true;
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    document.getElementById('wiz_mic_level').style.width = '0%';
+    document.getElementById('wiz_mic_label').textContent = 'Testing microphone...';
+    try {
+      const deviceId = document.getElementById('wiz_mic_device').value;
+      const level = await invoke('test_microphone_cmd', { deviceId: deviceId || '' });
+      const pct = Math.min(level * 200, 100);
+      document.getElementById('wiz_mic_level').style.width = pct + '%';
+      document.getElementById('wiz_mic_label').textContent =
+        level > 0.01 ? 'Microphone working! (peak: ' + level.toFixed(3) + ')' : 'No sound detected. Try speaking louder.';
+    } catch (e) {
+      document.getElementById('wiz_mic_label').textContent = 'Error: ' + e;
+    } finally {
+      _micTesting = false;
+      btn.disabled = false;
+      btn.textContent = 'Test Microphone';
+    }
+  }
+
+  function toggleKeyField(prefix) {
+    const type = document.getElementById(prefix + '_type').value;
+    const needsKey = ['OpenAIWhisper', 'OpenAICleaner', 'AnthropicCleaner'].includes(type);
+    document.getElementById(prefix + '_key_field').style.display = needsKey ? '' : 'none';
+  }
+
+  function setupHotkeyCapture() {
+    const input = document.getElementById('wiz_hotkey');
+    let keys = new Set();
+    input.addEventListener('focus', () => {
+      keys.clear();
+      input.value = 'Press keys...';
+    });
+    input.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      keys.add(e.key.toLowerCase() === 'control' ? 'Ctrl' :
+               e.key === 'Shift' ? 'Shift' :
+               e.key === 'Alt' ? 'Alt' :
+               e.key === 'Meta' ? 'Cmd' : e.key);
+      const mods = [];
+      if (keys.has('Ctrl')) mods.push('Ctrl');
+      if (keys.has('Shift')) mods.push('Shift');
+      if (keys.has('Alt')) mods.push('Alt');
+      if (keys.has('Cmd')) mods.push('Cmd');
+      const key = Array.from(keys).find(k => !['Ctrl','Shift','Alt','Cmd'].includes(k));
+      if (key) {
+        input.value = [...mods, key].join('+');
+        input.blur();
+      }
+    });
+    input.addEventListener('keyup', () => {});
+  }
+
+
+
+  function updateStep() {
+    for (let i = 0; i < TOTAL_STEPS; i++) {
+      document.getElementById('page_' + i).classList.toggle('active', i === _currentStep);
+      const dot = document.querySelectorAll('.step-dot')[i];
+      dot.className = 'step-dot' + (i === _currentStep ? ' active' : (i < _currentStep ? ' done' : ''));
+    }
+    const titles = ['Welcome', 'Microphone', 'Hotkeys', 'Speech-to-Text', 'AI Cleanup', 'Done'];
+    document.getElementById('step_title').textContent = titles[_currentStep];
+    document.getElementById('step_counter').textContent = `Step ${_currentStep + 1} of ${TOTAL_STEPS}`;
+    document.getElementById('wiz_prev').style.visibility = _currentStep === 0 ? 'hidden' : 'visible';
+    const nextBtn = document.getElementById('wiz_next');
+    if (_currentStep === TOTAL_STEPS - 1) {
+      nextBtn.textContent = 'Finish';
+    } else {
+      nextBtn.textContent = 'Next';
+    }
+  }
+
+  function prevStep() {
+    if (_currentStep > 0) {
+      _currentStep--;
+      updateStep();
+    }
+  }
+
+  async function nextStep() {
+    if (_currentStep === TOTAL_STEPS - 1) {
+      await finishWizard();
+      return;
+    }
+    _currentStep++;
+    updateStep();
+  }
+
+  async function finishWizard() {
+    const btn = document.getElementById('wiz_next');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const asrType = document.getElementById('wiz_asr_type').value;
+      const cleanerType = document.getElementById('wiz_cleaner_type').value;
+      const settings = {
+        version: '0.1.0',
+        microphone: {
+          device_id: document.getElementById('wiz_mic_device').value || null,
+          noise_gate_threshold: 0.02
+        },
+        hotkeys: {
+          hold_to_record: document.getElementById('wiz_hotkey').value,
+          toggle_mic: 'Ctrl+Shift+M',
+          retype_last: 'Ctrl+Shift+V'
+        },
+        asr_provider: asrType ? {
+          provider_type: asrType,
+          name: asrType,
+          settings: (asrType === 'OpenAIWhisper' ? { api_key: document.getElementById('wiz_asr_key').value } : {})
+        } : null,
+        cleaner_provider: cleanerType ? {
+          provider_type: cleanerType,
+          name: cleanerType,
+          settings: (['OpenAICleaner','AnthropicCleaner'].includes(cleanerType) ? { api_key: document.getElementById('wiz_cleaner_key').value } : {})
+        } : null,
+        profiles: [],
+        dictionary: [],
+        general: {
+          launch_at_startup: false,
+          sound_feedback: true,
+          auto_mute: false,
+          overlay_position: 'NearCursor',
+          history_retention_days: 30
+        }
+      };
+      await invoke('save_settings_cmd', { settings });
+      document.getElementById('done_hotkey').textContent = document.getElementById('wiz_hotkey').value;
+      await invoke('close_wizard_cmd');
+      // Fallback if invoke fails
+      setTimeout(() => { window.close(); }, 500);
+    } catch (e) {
+      alert('Failed to save settings: ' + e);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Finish';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

@@ -3,22 +3,56 @@ pub mod backend;
 pub mod context;
 pub mod hotkeys;
 pub mod injection;
+pub mod keychain;
 pub mod overlay;
 pub mod settings;
 pub mod tray;
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender};
 use ringbuf::traits::{Consumer, Observer};
-use speak_up_core::ipc::{BackendMessage, ClientMessage};
+use speak_up_core::ipc::{BackendMessage, ClientMessage, DictationEntry};
 use speak_up_core::AppContext;
 
+type HistoryResp = crossbeam_channel::Sender<Result<(Vec<DictationEntry>, usize), String>>;
+type LastDictResp = crossbeam_channel::Sender<Result<Option<DictationEntry>, String>>;
+
+pub enum BackendRequest {
+    QueryHistory {
+        limit: usize,
+        offset: usize,
+        search_term: Option<String>,
+        response_tx: HistoryResp,
+    },
+    QueryLastDictation {
+        response_tx: LastDictResp,
+    },
+    InjectText {
+        text: String,
+    },
+}
+
+use crate::context::ContextDetector;
 use crate::injection::TextInjector;
 use crate::overlay::OverlayState;
 use crate::tray::{AppState, TrayCommand};
 
 use hotkeys::HotkeyAction;
+
+static RELOAD_SETTINGS_TX: OnceLock<Sender<()>> = OnceLock::new();
+static BACKEND_REQ_TX: OnceLock<Sender<BackendRequest>> = OnceLock::new();
+
+pub fn notify_settings_changed() {
+    if let Some(tx) = RELOAD_SETTINGS_TX.get() {
+        let _ = tx.send(());
+    }
+}
+
+pub fn get_backend_request_tx() -> Option<Sender<BackendRequest>> {
+    BACKEND_REQ_TX.get().cloned()
+}
 
 pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt()
@@ -38,6 +72,24 @@ pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     let (overlay_tx, overlay_rx) = crossbeam_channel::unbounded::<OverlayState>();
     let (tray_cmd_tx, tray_cmd_rx) = crossbeam_channel::unbounded::<TrayCommand>();
     let (state_tx, state_rx) = crossbeam_channel::unbounded::<AppState>();
+
+    if crate::settings::is_first_run() {
+        let handle = app.handle().clone();
+        let handle2 = handle.clone();
+        // Defer window creation to after event loop starts so IPC bridge is available
+        let _ = handle.run_on_main_thread(move || {
+            let _ = tauri::WebviewWindowBuilder::new(
+                &handle2,
+                "wizard",
+                tauri::WebviewUrl::App("wizard.html".into()),
+            )
+            .title("Welcome to Speak Up")
+            .inner_size(580.0, 520.0)
+            .center()
+            .resizable(false)
+            .build();
+        });
+    }
 
     let overlay_cfg = overlay::OverlayConfig::default();
     std::thread::spawn(move || {
@@ -81,6 +133,19 @@ pub struct MainLoopConfig {
     pub backend_port: u16,
 }
 
+fn register_hotkeys(hotkey_mgr: &mut hotkeys::HotkeyManager, settings: &speak_up_core::Settings) {
+    hotkey_mgr.unregister_all();
+    if let Err(e) = hotkey_mgr.register(&settings.hotkeys.hold_to_record, HotkeyAction::ToggleRecording) {
+        tracing::warn!("Failed to register record hotkey '{}': {:?}", settings.hotkeys.hold_to_record, e);
+    }
+    if let Err(e) = hotkey_mgr.register(&settings.hotkeys.toggle_mic, HotkeyAction::StopRecording) {
+        tracing::warn!("Failed to register stop hotkey '{}': {:?}", settings.hotkeys.toggle_mic, e);
+    }
+    if let Err(e) = hotkey_mgr.register(&settings.hotkeys.retype_last, HotkeyAction::RetypeLast) {
+        tracing::warn!("Failed to register retype hotkey '{}': {:?}", settings.hotkeys.retype_last, e);
+    }
+}
+
 fn run_main_loop(cfg: MainLoopConfig) {
     let backend = match backend::BackendClient::spawn_and_connect(cfg.backend_port) {
         Ok(b) => b,
@@ -97,16 +162,9 @@ fn run_main_loop(cfg: MainLoopConfig) {
             return;
         }
     };
-    if let Err(e) = hotkey_mgr.register("Ctrl+Shift+Space", HotkeyAction::ToggleRecording) {
-        tracing::warn!("Failed to register toggle hotkey: {:?}", e);
-    }
-    if let Err(e) = hotkey_mgr.register("Ctrl+Shift+M", HotkeyAction::StopRecording) {
-        tracing::warn!("Failed to register stop hotkey: {:?}", e);
-    }
-    if let Err(e) = hotkey_mgr.register("Ctrl+Shift+V", HotkeyAction::RetypeLast) {
-        tracing::warn!("Failed to register retype hotkey: {:?}", e);
-    }
+    register_hotkeys(&mut hotkey_mgr, &crate::settings::load_settings_from_disk());
 
+    let mut context_detector = context::DefaultContextDetector::new();
     let mut audio = audio::AudioCapture::new();
     let mut injector = match injection::DefaultTextInjector::new() {
         Ok(i) => i,
@@ -119,8 +177,20 @@ fn run_main_loop(cfg: MainLoopConfig) {
     let mut recording = false;
     let mut current_session_id = None;
     let mut overlay_state = OverlayState::default();
+    let mut last_cleaned_text: Option<String> = None;
 
     let _state_tx = cfg.state_tx;
+
+    let (reload_tx, reload_rx) = crossbeam_channel::unbounded::<()>();
+    let _ = RELOAD_SETTINGS_TX.set(reload_tx);
+
+    let (backend_req_tx, backend_req_rx) = crossbeam_channel::unbounded::<BackendRequest>();
+    let _ = BACKEND_REQ_TX.set(backend_req_tx);
+
+    let mut pending_history_resp: Option<HistoryResp> = None;
+    let mut pending_last_dict_resp: Option<LastDictResp> = None;
+
+    let mut was_muted: Option<bool> = None;
 
     loop {
         if let Some(action) = hotkey_mgr.poll_event() {
@@ -137,6 +207,16 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             continue;
                         }
 
+                        let settings = crate::settings::load_settings_from_disk();
+                        if settings.general.auto_mute {
+                            was_muted = crate::audio::get_sink_mute_state().ok();
+                            if was_muted != Some(true) {
+                                if let Err(e) = crate::audio::set_system_audio_mute(true) {
+                                    tracing::warn!("Auto-mute failed: {}", e);
+                                }
+                            }
+                        }
+
                         update_overlay_fn(
                             &cfg.overlay_tx,
                             &mut overlay_state,
@@ -149,13 +229,14 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             },
                         );
 
+                        context_detector.poll();
                         let msg = ClientMessage::StartSession {
-                            app_context: AppContext {
+                            app_context: context_detector.last_context().unwrap_or_else(|| AppContext {
                                 window_title: String::new(),
                                 executable_name: String::new(),
                                 window_class: String::new(),
                                 profile_name: None,
-                            },
+                            }),
                         };
                         if let Ok(data) = bincode::serialize(&msg) {
                             let _ = backend.to_backend.send(data);
@@ -167,6 +248,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             current_session_id.take(),
                             &cfg.overlay_tx,
                             &mut overlay_state,
+                            &mut was_muted,
                         );
                         let _ = _state_tx.send(AppState::Processing);
                         recording = false;
@@ -180,6 +262,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             current_session_id.take(),
                             &cfg.overlay_tx,
                             &mut overlay_state,
+                            &mut was_muted,
                         );
                         let _ = _state_tx.send(AppState::Processing);
                         recording = false;
@@ -207,6 +290,16 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             continue;
                         }
 
+                        let settings = crate::settings::load_settings_from_disk();
+                        if settings.general.auto_mute {
+                            was_muted = crate::audio::get_sink_mute_state().ok();
+                            if was_muted != Some(true) {
+                                if let Err(e) = crate::audio::set_system_audio_mute(true) {
+                                    tracing::warn!("Auto-mute failed: {}", e);
+                                }
+                            }
+                        }
+
                         update_overlay_fn(
                             &cfg.overlay_tx,
                             &mut overlay_state,
@@ -219,13 +312,14 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             },
                         );
 
+                        context_detector.poll();
                         let msg = ClientMessage::StartSession {
-                            app_context: AppContext {
+                            app_context: context_detector.last_context().unwrap_or_else(|| AppContext {
                                 window_title: String::new(),
                                 executable_name: String::new(),
                                 window_class: String::new(),
                                 profile_name: None,
-                            },
+                            }),
                         };
                         if let Ok(data) = bincode::serialize(&msg) {
                             let _ = backend.to_backend.send(data);
@@ -237,6 +331,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             current_session_id.take(),
                             &cfg.overlay_tx,
                             &mut overlay_state,
+                            &mut was_muted,
                         );
                         let _ = _state_tx.send(AppState::Processing);
                         recording = false;
@@ -250,6 +345,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
                             current_session_id.take(),
                             &cfg.overlay_tx,
                             &mut overlay_state,
+                            &mut was_muted,
                         );
                         let _ = _state_tx.send(AppState::Processing);
                         recording = false;
@@ -268,6 +364,40 @@ fn run_main_loop(cfg: MainLoopConfig) {
             }
         }
 
+        if reload_rx.try_recv().is_ok() {
+            tracing::info!("Settings changed, reloading on backend and re-registering hotkeys");
+            let msg = ClientMessage::ReloadSettings;
+            if let Ok(data) = bincode::serialize(&msg) {
+                let _ = backend.to_backend.send(data);
+            }
+            let settings = crate::settings::load_settings_from_disk();
+            register_hotkeys(&mut hotkey_mgr, &settings);
+        }
+
+        while let Ok(req) = backend_req_rx.try_recv() {
+            match req {
+                BackendRequest::QueryHistory { limit, offset, search_term, response_tx } => {
+                    let msg = ClientMessage::QueryHistory { limit, offset, search_term };
+                    if let Ok(data) = bincode::serialize(&msg) {
+                        let _ = backend.to_backend.send(data);
+                    }
+                    pending_history_resp = Some(response_tx);
+                }
+                BackendRequest::QueryLastDictation { response_tx } => {
+                    let msg = ClientMessage::QueryLastDictation;
+                    if let Ok(data) = bincode::serialize(&msg) {
+                        let _ = backend.to_backend.send(data);
+                    }
+                    pending_last_dict_resp = Some(response_tx);
+                }
+                BackendRequest::InjectText { text } => {
+                    if let Err(e) = injector.inject_text(&text) {
+                        tracing::error!("Inject text from history failed: {:?}", e);
+                    }
+                }
+            }
+        }
+
         while let Ok(data) = backend.from_backend.try_recv() {
             if let Ok(msg) = bincode::deserialize::<BackendMessage>(&data) {
                 handle_backend_message(
@@ -279,9 +409,14 @@ fn run_main_loop(cfg: MainLoopConfig) {
                     &cfg.overlay_tx,
                     &mut overlay_state,
                     &_state_tx,
+                    &mut last_cleaned_text,
+                    &mut pending_history_resp,
+                    &mut pending_last_dict_resp,
                 );
             }
         }
+
+        context_detector.poll();
 
         if recording {
             let level = audio.current_level();
@@ -301,8 +436,17 @@ fn do_stop_recording(
     session_id: Option<uuid::Uuid>,
     overlay_tx: &Sender<OverlayState>,
     overlay_state: &mut OverlayState,
+    was_muted: &mut Option<bool>,
 ) {
     audio.stop();
+
+    if let Some(muted) = was_muted.take() {
+        if !muted {
+            if let Err(e) = crate::audio::set_system_audio_mute(false) {
+                tracing::warn!("Auto-unmute failed: {}", e);
+            }
+        }
+    }
     if let Some(sid) = session_id {
         let msg = ClientMessage::EndSession { session_id: sid };
         if let Ok(data) = bincode::serialize(&msg) {
@@ -332,6 +476,9 @@ fn handle_backend_message(
     overlay_tx: &crossbeam_channel::Sender<OverlayState>,
     overlay_state: &mut OverlayState,
     state_tx: &crossbeam_channel::Sender<AppState>,
+    last_cleaned_text: &mut Option<String>,
+    pending_history_resp: &mut Option<HistoryResp>,
+    pending_last_dict_resp: &mut Option<LastDictResp>,
 ) {
     match msg {
         BackendMessage::SessionStarted { session_id } => {
@@ -367,6 +514,7 @@ fn handle_backend_message(
             cleaned_text,
         } => {
             tracing::info!("Final transcript: {}", cleaned_text);
+            *last_cleaned_text = Some(cleaned_text.clone());
 
             update_overlay_fn(
                 overlay_tx,
@@ -408,9 +556,27 @@ fn handle_backend_message(
         } => {
             tracing::error!("Backend error: {}", message);
         }
-        BackendMessage::ProviderSwitched { .. }
-        | BackendMessage::HistoryResult { .. }
-        | BackendMessage::LastDictationResult { .. } => {}
+        BackendMessage::ProviderSwitched { .. } => {}
+        BackendMessage::HistoryResult {
+            entries,
+            total_count,
+        } => {
+            tracing::debug!("History query: {} entries of {}", entries.len(), total_count);
+            if let Some(tx) = pending_history_resp.take() {
+                let _ = tx.send(Ok((entries, total_count)));
+            }
+        }
+        BackendMessage::LastDictationResult { entry } => {
+            if let Some(ref e) = entry {
+                tracing::debug!("Last dictation: {}", e.cleaned_text);
+                if last_cleaned_text.is_none() {
+                    *last_cleaned_text = Some(e.cleaned_text.clone());
+                }
+            }
+            if let Some(tx) = pending_last_dict_resp.take() {
+                let _ = tx.send(Ok(entry));
+            }
+        }
     }
 }
 

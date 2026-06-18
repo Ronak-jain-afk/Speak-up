@@ -41,3 +41,34 @@ pub enum ASRError {
 
 pub mod cloud;
 pub mod local;
+
+use speak_up_core::ProviderConfig;
+
+pub fn build_asr_engine(config: &Option<ProviderConfig>) -> Box<dyn ASREngine + Send + Sync> {
+    match config {
+        Some(cfg) if cfg.provider_type == speak_up_core::ProviderType::OpenAIWhisper => {
+            let api_key = cfg
+                .settings
+                .get("api_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let model = cfg
+                .settings
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let language = cfg
+                .settings
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            Box::new(cloud::CloudWhisper::new(api_key, model, language))
+        }
+        Some(cfg) if cfg.provider_type == speak_up_core::ProviderType::Deepgram => {
+            tracing::warn!("Deepgram ASR not yet implemented, falling back to MockWhisper");
+            Box::new(local::MockWhisper::new())
+        }
+        _ => Box::new(local::MockWhisper::new()),
+    }
+}

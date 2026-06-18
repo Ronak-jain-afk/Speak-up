@@ -14,7 +14,13 @@ impl WindowsContextDetector {
 
 impl ContextDetector for WindowsContextDetector {
     fn get_active_window(&self) -> Result<AppContext, ContextError> {
-        unimplemented!("Phase 10")
+        tracing::warn!("Windows context detection not implemented, using empty context");
+        Ok(AppContext {
+            window_title: String::new(),
+            executable_name: String::new(),
+            window_class: String::new(),
+            profile_name: None,
+        })
     }
 
     fn poll(&mut self) {

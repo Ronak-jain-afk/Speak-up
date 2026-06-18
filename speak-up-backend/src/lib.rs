@@ -2,6 +2,7 @@ pub mod asr;
 pub mod cleaner;
 pub mod dictionary;
 pub mod history;
+pub mod models;
 pub mod profiles;
 pub mod providers;
 pub mod server;
@@ -14,15 +15,26 @@ use speak_up_core::Settings;
 pub async fn run_async(port: u16) {
     tracing::info!("Speak Up backend v{} starting", env!("CARGO_PKG_VERSION"));
 
-    let asr_engine: Box<dyn asr::ASREngine + Send + Sync> =
-        Box::new(asr::local::MockWhisper::new());
-
     let settings = load_settings();
+
+    let asr_engine = asr::build_asr_engine(&settings.asr_provider);
+
     let provider_mgr = Arc::new(providers::ProviderManager::new(
         &settings.cleaner_provider,
     ));
 
     let session_manager = Arc::new(session::SessionManager::new(asr_engine, provider_mgr));
+
+    let db_path = history_db_path();
+    match history::HistoryStore::new(&db_path) {
+        Ok(store) => {
+            session_manager.set_history_store(store);
+            tracing::info!("History database at {}", db_path);
+        }
+        Err(e) => {
+            tracing::error!("Failed to open history database: {}", e);
+        }
+    }
 
     server::start_server(port, session_manager).await;
 }
@@ -44,7 +56,7 @@ pub fn run_with_port(port: u16) {
     rt.block_on(run_async(port));
 }
 
-fn load_settings() -> Settings {
+pub fn load_settings() -> Settings {
     let config_dir = dirs::config_dir()
         .map(|p| p.join("speak-up"))
         .unwrap_or_else(|| std::path::PathBuf::from("~/.config/speak-up"));
@@ -61,4 +73,10 @@ fn load_settings() -> Settings {
     }
 }
 
-
+fn history_db_path() -> String {
+    let data_dir = dirs::data_dir()
+        .map(|p| p.join("speak-up"))
+        .unwrap_or_else(|| std::path::PathBuf::from("~/.local/share/speak-up"));
+    std::fs::create_dir_all(&data_dir).ok();
+    data_dir.join("history.db").to_string_lossy().to_string()
+}

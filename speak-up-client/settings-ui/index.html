@@ -173,6 +173,53 @@
       </div>
     </div>
   </div>
+
+  <div class="section">
+    <h2>Dictionary</h2>
+    <div class="desc" style="margin-bottom:8px;">
+      Teach the AI how to spell specific words (e.g., "speak up" → "Speak Up").
+    </div>
+    <div id="dict_list"></div>
+    <div class="field">
+      <input type="text" id="dict_spoken" placeholder="Spoken form" style="width:140px;">
+      <input type="text" id="dict_written" placeholder="Written form" style="width:140px;">
+      <button class="btn btn-secondary" onclick="addDictEntry()">+ Add</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Profile Mappings</h2>
+    <div class="desc" style="margin-bottom:8px;">
+      Match application window patterns to dictation profiles.
+    </div>
+    <div id="profile_list"></div>
+    <div class="field">
+      <input type="text" id="prof_pattern" placeholder="App regex pattern" style="width:180px;">
+      <select id="prof_name" style="width:120px;">
+        <option value="generic">Generic</option>
+        <option value="email">Email</option>
+        <option value="chat">Chat</option>
+        <option value="code">Code</option>
+        <option value="terminal">Terminal</option>
+      </select>
+      <button class="btn btn-secondary" onclick="addProfileMapping()">+ Add</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>History</h2>
+    <div class="field">
+      <input type="text" id="history_search" placeholder="Search transcript..." style="width:260px;" onkeydown="if(event.key==='Enter')loadHistory()">
+      <button class="btn btn-secondary" onclick="loadHistory()">Search</button>
+      <button class="btn btn-secondary" onclick="clearSearch()">Clear</button>
+    </div>
+    <div id="history_list" style="margin-top:8px;"></div>
+    <div id="history_pages" class="field" style="justify-content:center;gap:8px;display:none;margin-top:8px;">
+      <button class="btn btn-secondary" id="hist_prev" onclick="prevPage()">← Prev</button>
+      <span id="hist_page_info" style="font-size:12px;color:#666;"></span>
+      <button class="btn btn-secondary" id="hist_next" onclick="nextPage()">Next →</button>
+    </div>
+  </div>
 </div>
 
 <div class="save-bar">
@@ -182,6 +229,155 @@
 
 <script>
   const { invoke } = window.__TAURI__ ? window.__TAURI__.core : {};
+  let _dictData = [];
+  let _profileData = [];
+
+  function renderDict() {
+    const el = document.getElementById('dict_list');
+    el.innerHTML = _dictData.map((e, i) =>
+      `<div class="field" style="padding:4px 0;">
+        <span style="font-size:13px;width:140px;">${escapeHtml(e.spoken_form)}</span>
+        <span style="font-size:13px;color:#888;">→</span>
+        <span style="font-size:13px;width:140px;">${escapeHtml(e.written_form)}</span>
+        <button class="btn btn-secondary" style="padding:2px 10px;font-size:11px;" onclick="removeDictEntry(${i})">×</button>
+      </div>`
+    ).join('');
+    if (_dictData.length === 0) el.innerHTML = '<div class="desc">No dictionary entries yet.</div>';
+  }
+
+  function addDictEntry() {
+    const spoken = document.getElementById('dict_spoken').value.trim();
+    const written = document.getElementById('dict_written').value.trim();
+    if (!spoken || !written) return;
+    _dictData.push({ spoken_form: spoken, written_form: written });
+    document.getElementById('dict_spoken').value = '';
+    document.getElementById('dict_written').value = '';
+    renderDict();
+  }
+
+  function removeDictEntry(idx) {
+    _dictData.splice(idx, 1);
+    renderDict();
+  }
+
+  function renderProfiles() {
+    const el = document.getElementById('profile_list');
+    el.innerHTML = _profileData.map((p, i) =>
+      `<div class="field" style="padding:4px 0;">
+        <span style="font-size:13px;font-family:monospace;width:180px;">${escapeHtml(p.app_pattern)}</span>
+        <span style="font-size:13px;color:#888;">→</span>
+        <span style="font-size:13px;width:120px;">${escapeHtml(p.profile_name)}</span>
+        <button class="btn btn-secondary" style="padding:2px 10px;font-size:11px;" onclick="removeProfileMapping(${i})">×</button>
+      </div>`
+    ).join('');
+    if (_profileData.length === 0) el.innerHTML = '<div class="desc">No custom profile mappings.</div>';
+  }
+
+  function addProfileMapping() {
+    const pattern = document.getElementById('prof_pattern').value.trim();
+    const name = document.getElementById('prof_name').value;
+    if (!pattern) return;
+    _profileData.push({ app_pattern: pattern, profile_name: name });
+    document.getElementById('prof_pattern').value = '';
+    renderProfiles();
+  }
+
+  function removeProfileMapping(idx) {
+    _profileData.splice(idx, 1);
+    renderProfiles();
+  }
+
+  let _histPage = 0;
+  let _histSearch = null;
+  const HIST_PAGE_SIZE = 20;
+
+  async function loadHistory() {
+    const search = document.getElementById('history_search').value.trim() || null;
+    _histSearch = search;
+    _histPage = 0;
+    await fetchHistory();
+  }
+
+  function clearSearch() {
+    document.getElementById('history_search').value = '';
+    _histSearch = null;
+    _histPage = 0;
+    fetchHistory();
+  }
+
+  function prevPage() {
+    if (_histPage > 0) { _histPage--; fetchHistory(); }
+  }
+
+  function nextPage() {
+    _histPage++;
+    fetchHistory();
+  }
+
+  async function fetchHistory() {
+    const el = document.getElementById('history_list');
+    el.innerHTML = '<div class="desc">Loading...</div>';
+    try {
+      const result = await invoke('query_history_cmd', {
+        limit: HIST_PAGE_SIZE,
+        offset: _histPage * HIST_PAGE_SIZE,
+        searchTerm: _histSearch,
+      });
+      const entries = result[0];
+      const total = result[1];
+      if (entries.length === 0) {
+        el.innerHTML = '<div class="desc">No dictation history found.</div>';
+        document.getElementById('history_pages').style.display = 'none';
+        return;
+      }
+      el.innerHTML = entries.map(e => {
+        const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '';
+        const cleaned = escapeHtml(e.cleaned_text || '');
+        const raw = escapeHtml(e.raw_text || '');
+        const dur = e.duration_ms ? (e.duration_ms / 1000).toFixed(1) + 's' : '';
+        return `<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px;margin-bottom:8px;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;display:flex;gap:12px;">
+            <span>${ts}</span>
+            ${dur ? `<span>${dur}</span>` : ''}
+            ${e.app_context ? `<span title="${escapeHtml(e.app_context)}">${escapeHtml(e.app_context).substring(0,30)}</span>` : ''}
+          </div>
+          <div style="font-size:13px;margin-bottom:4px;">${cleaned || raw}</div>
+          ${cleaned && raw !== cleaned ? `<div style="font-size:11px;color:#999;">raw: ${raw.substring(0,80)}${raw.length>80?'...':''}</div>` : ''}
+          <div style="margin-top:6px;">
+            <button class="btn btn-secondary" style="padding:2px 10px;font-size:11px;" data-text="${escapeAttr(cleaned || raw)}" onclick="retypeText(this.dataset.text)">Re-type</button>
+          </div>
+        </div>`;
+      }).join('');
+      const totalPages = Math.ceil(total / HIST_PAGE_SIZE);
+      const pages = document.getElementById('history_pages');
+      pages.style.display = 'flex';
+      document.getElementById('hist_prev').style.visibility = _histPage > 0 ? 'visible' : 'hidden';
+      document.getElementById('hist_next').style.visibility = _histPage < totalPages - 1 ? 'visible' : 'hidden';
+      document.getElementById('hist_page_info').textContent = `Page ${_histPage + 1} of ${totalPages} (${total} total)`;
+    } catch (e) {
+      el.innerHTML = '<div class="desc error" style="color:#721c24;">Failed to load history: ' + escapeHtml(String(e)) + '</div>';
+      document.getElementById('history_pages').style.display = 'none';
+    }
+  }
+
+  async function retypeText(text) {
+    try {
+      await invoke('inject_text_cmd', { text });
+      showStatus('Text re-typed.', true);
+    } catch (e) {
+      showStatus('Failed to re-type: ' + e, false);
+    }
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 
   async function loadSettings() {
     if (!invoke) return;
@@ -212,6 +408,12 @@
           document.getElementById('cleaner_api_key').value = s.cleaner_provider.settings.api_key;
         }
       }
+
+      _dictData = (s.dictionary || []).map(e => ({ spoken_form: e.spoken_form, written_form: e.written_form }));
+      renderDict();
+
+      _profileData = (s.profiles || []).map(p => ({ app_pattern: p.app_pattern, profile_name: p.profile_name }));
+      renderProfiles();
 
       const devices = await invoke('get_audio_devices_cmd');
       const sel = document.getElementById('mic_device');
@@ -247,8 +449,8 @@
           },
           asr_provider: asrProvider,
           cleaner_provider: cleanerProvider,
-          profiles: [],
-          dictionary: [],
+          profiles: _profileData,
+          dictionary: _dictData,
           general: {
             launch_at_startup: document.getElementById('launch_at_startup').checked,
             sound_feedback: document.getElementById('sound_feedback').checked,
@@ -299,7 +501,16 @@
   document.getElementById('noise_gate').addEventListener('input', function() {
     document.getElementById('noise_gate_val').textContent = Number(this.value).toFixed(3);
   });
-  document.addEventListener('DOMContentLoaded', loadSettings);
+  document.getElementById('dict_written').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') addDictEntry();
+  });
+  document.getElementById('prof_pattern').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') addProfileMapping();
+  });
+  document.addEventListener('DOMContentLoaded', function() {
+    loadSettings();
+    loadHistory();
+  });
 </script>
 </body>
 </html>

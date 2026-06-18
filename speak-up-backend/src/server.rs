@@ -113,7 +113,8 @@ async fn handle_connection(
                 let tx = msg_tx.clone();
                 let sm = session_manager.clone();
                 match session_manager.finalize_session(session_id).await {
-                    Some((mut events_rx, task)) => {
+                    Some((mut events_rx, task, start_time, app_context)) => {
+                        let app_ctx_json = serde_json::to_string(&app_context).ok();
                         tokio::spawn(async move {
                             while let Some(event) = events_rx.recv().await {
                                 if event.is_final {
@@ -144,7 +145,14 @@ async fn handle_connection(
                                     let _ = tx.send(data).await;
                                 }
 
-                                let cleaned_text = sm.clean_transcript(&raw_text).await;
+                                let cleaned_text = sm.clean_transcript(&raw_text, Some(&app_context)).await;
+
+                                sm.write_history(
+                                    &raw_text,
+                                    &cleaned_text,
+                                    start_time,
+                                    app_ctx_json.as_deref(),
+                                ).await;
 
                                 let transcript = BackendMessage::FinalTranscript {
                                     session_id,
@@ -219,18 +227,32 @@ async fn handle_connection(
 
             ClientMessage::ReloadSettings => {
                 tracing::info!("Settings reload requested");
+                session_manager.reload_settings().await;
+                let response = BackendMessage::ProviderSwitched {
+                    provider_type: speak_up_core::ProviderType::LocalLLM,
+                    success: true,
+                    error: None,
+                };
+                send_message(&msg_tx, &response).await;
             }
 
-            ClientMessage::QueryHistory { .. } => {
+            ClientMessage::QueryHistory {
+                limit,
+                offset,
+                search_term,
+            } => {
+                let (entries, total_count) =
+                    session_manager.query_history(limit, offset, search_term).await;
                 let response = BackendMessage::HistoryResult {
-                    entries: Vec::new(),
-                    total_count: 0,
+                    entries,
+                    total_count,
                 };
                 send_message(&msg_tx, &response).await;
             }
 
             ClientMessage::QueryLastDictation => {
-                let response = BackendMessage::LastDictationResult { entry: None };
+                let entry = session_manager.get_last_dictation().await;
+                let response = BackendMessage::LastDictationResult { entry };
                 send_message(&msg_tx, &response).await;
             }
         }
