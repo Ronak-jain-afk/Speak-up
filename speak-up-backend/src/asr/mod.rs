@@ -65,6 +65,38 @@ pub fn build_asr_engine(config: &Option<ProviderConfig>) -> Box<dyn ASREngine + 
                 .map(|s| s.to_string());
             Box::new(cloud::CloudWhisper::new(api_key, model, language))
         }
+        Some(cfg) if cfg.provider_type == speak_up_core::ProviderType::LocalWhisper => {
+            let mut engine = local::LocalWhisper::new();
+            let language = cfg
+                .settings
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let model_path = cfg
+                .settings
+                .get("model_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let asr_cfg = ASRConfig {
+                model_path,
+                language,
+                hot_words: Vec::new(),
+            };
+            if let Err(e) = engine.initialize(&asr_cfg) {
+                #[cfg(feature = "local-asr")]
+                tracing::error!("LocalWhisper init failed: {} — falling back to MockWhisper", e);
+                #[cfg(not(feature = "local-asr"))]
+                {
+                    let _ = e;
+                    tracing::warn!(
+                        "LocalWhisper not available — build with --features local-asr. Falling back to MockWhisper"
+                    );
+                }
+                Box::new(local::MockWhisper::new())
+            } else {
+                Box::new(engine)
+            }
+        }
         Some(cfg) if cfg.provider_type == speak_up_core::ProviderType::Deepgram => {
             tracing::warn!("Deepgram ASR not yet implemented, falling back to MockWhisper");
             Box::new(local::MockWhisper::new())

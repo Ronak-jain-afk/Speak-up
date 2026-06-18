@@ -114,7 +114,11 @@ pub fn default_settings() -> Settings {
             toggle_mic: "Ctrl+Shift+M".into(),
             retype_last: "Ctrl+Shift+V".into(),
         },
-        asr_provider: None,
+        asr_provider: Some(ProviderConfig {
+            provider_type: ProviderType::LocalWhisper,
+            name: "LocalWhisper".into(),
+            settings: serde_json::json!({}),
+        }),
         cleaner_provider: None,
         profiles: vec![
             ProfileMapping { app_pattern: ".*Outlook.*".into(), profile_name: "email".into() },
