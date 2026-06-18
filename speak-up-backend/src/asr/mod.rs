@@ -39,6 +39,16 @@ pub enum ASRError {
     ModelNotFound(String),
 }
 
+impl std::fmt::Display for ASRError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ASRError::Initialization(msg) => write!(f, "Initialization error: {}", msg),
+            ASRError::Inference(msg) => write!(f, "Inference error: {}", msg),
+            ASRError::ModelNotFound(msg) => write!(f, "Model not found: {}", msg),
+        }
+    }
+}
+
 pub mod cloud;
 pub mod local;
 
