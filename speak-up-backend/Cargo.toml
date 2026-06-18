@@ -26,5 +26,5 @@ sha2 = "0.10"
 whisper-rs = { version = "0.13", optional = true }
 
 [features]
-default = []
+default = ["local-asr"]
 local-asr = ["whisper-rs"]
