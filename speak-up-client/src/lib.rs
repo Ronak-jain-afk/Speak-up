@@ -5,20 +5,22 @@ pub mod hotkeys;
 pub mod injection;
 pub mod overlay;
 pub mod settings;
+pub mod tray;
 
 use std::time::Duration;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use ringbuf::traits::{Consumer, Observer};
 use speak_up_core::ipc::{BackendMessage, ClientMessage};
 use speak_up_core::AppContext;
 
 use crate::injection::TextInjector;
+use crate::overlay::OverlayState;
+use crate::tray::{AppState, TrayCommand};
 
 use hotkeys::HotkeyAction;
-use overlay::OverlayState;
 
-pub fn run() {
+pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -33,17 +35,54 @@ pub fn run() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(9876);
 
-    // Overlay state channel
     let (overlay_tx, overlay_rx) = crossbeam_channel::unbounded::<OverlayState>();
+    let (tray_cmd_tx, tray_cmd_rx) = crossbeam_channel::unbounded::<TrayCommand>();
+    let (state_tx, state_rx) = crossbeam_channel::unbounded::<AppState>();
 
-    // Spawn overlay thread
     let overlay_cfg = overlay::OverlayConfig::default();
     std::thread::spawn(move || {
         overlay::run_overlay_loop(overlay_cfg, overlay_rx);
     });
 
-    // Connect to backend
-    let backend = match backend::BackendClient::spawn_and_connect(default_port) {
+    std::thread::spawn(move || {
+        run_main_loop(MainLoopConfig {
+            overlay_tx,
+            tray_cmd_rx,
+            state_tx,
+            backend_port: default_port,
+        });
+    });
+
+    let app_handle = app.handle().clone();
+    std::thread::spawn(move || {
+        let tray_ctx = match tray::build_tray(&app_handle, tray_cmd_tx) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Failed to build tray: {:?}", e);
+                return;
+            }
+        };
+        let mut current_state = AppState::Idle;
+        while let Ok(new_state) = state_rx.recv() {
+            if new_state != current_state {
+                current_state = new_state;
+                tray::update_tray_label(&tray_ctx, current_state);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+pub struct MainLoopConfig {
+    pub overlay_tx: Sender<OverlayState>,
+    pub tray_cmd_rx: Receiver<TrayCommand>,
+    pub state_tx: Sender<AppState>,
+    pub backend_port: u16,
+}
+
+fn run_main_loop(cfg: MainLoopConfig) {
+    let backend = match backend::BackendClient::spawn_and_connect(cfg.backend_port) {
         Ok(b) => b,
         Err(e) => {
             tracing::error!("Backend connection failed: {}", e);
@@ -51,7 +90,6 @@ pub fn run() {
         }
     };
 
-    // Register hotkeys
     let mut hotkey_mgr = match hotkeys::HotkeyManager::new() {
         Ok(h) => h,
         Err(e) => {
@@ -82,23 +120,16 @@ pub fn run() {
     let mut current_session_id = None;
     let mut overlay_state = OverlayState::default();
 
-    fn update_overlay(
-        tx: &Sender<OverlayState>,
-        state: &mut OverlayState,
-        new: OverlayState,
-    ) {
-        *state = new.clone();
-        let _ = tx.send(new);
-    }
+    let _state_tx = cfg.state_tx;
 
     loop {
-        // --- Hotkey events ---
         if let Some(action) = hotkey_mgr.poll_event() {
             match action {
                 HotkeyAction::ToggleRecording | HotkeyAction::StartRecording => {
                     if !recording {
                         tracing::info!("Starting recording");
                         recording = true;
+                        let _ = _state_tx.send(AppState::Recording);
 
                         if let Err(e) = audio.start("") {
                             tracing::error!("Audio start failed: {}", e);
@@ -106,8 +137,8 @@ pub fn run() {
                             continue;
                         }
 
-                        update_overlay(
-                            &overlay_tx,
+                        update_overlay_fn(
+                            &cfg.overlay_tx,
                             &mut overlay_state,
                             OverlayState {
                                 is_visible: true,
@@ -129,26 +160,28 @@ pub fn run() {
                         if let Ok(data) = bincode::serialize(&msg) {
                             let _ = backend.to_backend.send(data);
                         }
+                    } else {
+                        do_stop_recording(
+                            &mut audio,
+                            &backend.to_backend,
+                            current_session_id.take(),
+                            &cfg.overlay_tx,
+                            &mut overlay_state,
+                        );
+                        let _ = _state_tx.send(AppState::Processing);
+                        recording = false;
                     }
                 }
                 HotkeyAction::StopRecording => {
                     if recording {
-                        stop_recording(
+                        do_stop_recording(
                             &mut audio,
                             &backend.to_backend,
                             current_session_id.take(),
-                        );
-                        let state_clone = overlay_state.clone();
-                        update_overlay(
-                            &overlay_tx,
+                            &cfg.overlay_tx,
                             &mut overlay_state,
-                            OverlayState {
-                                is_visible: true,
-                                is_recording: false,
-                                is_processing: true,
-                                ..state_clone
-                            },
                         );
+                        let _ = _state_tx.send(AppState::Processing);
                         recording = false;
                     }
                 }
@@ -160,7 +193,81 @@ pub fn run() {
             }
         }
 
-        // --- Backend messages ---
+        if let Ok(cmd) = cfg.tray_cmd_rx.try_recv() {
+            match cmd {
+                TrayCommand::ToggleRecording => {
+                    if !recording {
+                        tracing::info!("Starting recording (tray)");
+                        recording = true;
+                        let _ = _state_tx.send(AppState::Recording);
+
+                        if let Err(e) = audio.start("") {
+                            tracing::error!("Audio start failed: {}", e);
+                            recording = false;
+                            continue;
+                        }
+
+                        update_overlay_fn(
+                            &cfg.overlay_tx,
+                            &mut overlay_state,
+                            OverlayState {
+                                is_visible: true,
+                                is_recording: true,
+                                audio_level: 0.0,
+                                transcript: String::new(),
+                                is_processing: false,
+                            },
+                        );
+
+                        let msg = ClientMessage::StartSession {
+                            app_context: AppContext {
+                                window_title: String::new(),
+                                executable_name: String::new(),
+                                window_class: String::new(),
+                                profile_name: None,
+                            },
+                        };
+                        if let Ok(data) = bincode::serialize(&msg) {
+                            let _ = backend.to_backend.send(data);
+                        }
+                    } else {
+                        do_stop_recording(
+                            &mut audio,
+                            &backend.to_backend,
+                            current_session_id.take(),
+                            &cfg.overlay_tx,
+                            &mut overlay_state,
+                        );
+                        let _ = _state_tx.send(AppState::Processing);
+                        recording = false;
+                    }
+                }
+                TrayCommand::StopRecording => {
+                    if recording {
+                        do_stop_recording(
+                            &mut audio,
+                            &backend.to_backend,
+                            current_session_id.take(),
+                            &cfg.overlay_tx,
+                            &mut overlay_state,
+                        );
+                        let _ = _state_tx.send(AppState::Processing);
+                        recording = false;
+                    }
+                }
+                TrayCommand::RetypeLast => {
+                    if let Err(e) = injector.retype_last() {
+                        tracing::warn!("Retype failed: {:?}", e);
+                    }
+                }
+                TrayCommand::OpenSettings => {}
+                TrayCommand::Quit => {
+                    tracing::info!("Quit requested via tray");
+                    break;
+                }
+            }
+        }
+
         while let Ok(data) = backend.from_backend.try_recv() {
             if let Ok(msg) = bincode::deserialize::<BackendMessage>(&data) {
                 handle_backend_message(
@@ -169,18 +276,18 @@ pub fn run() {
                     &mut audio,
                     &backend.audio_tx,
                     &mut injector,
-                    &overlay_tx,
+                    &cfg.overlay_tx,
                     &mut overlay_state,
+                    &_state_tx,
                 );
             }
         }
 
-        // --- Update audio level during recording ---
         if recording {
             let level = audio.current_level();
             if (level - overlay_state.audio_level).abs() > 0.01 {
                 overlay_state.audio_level = level;
-                let _ = overlay_tx.send(overlay_state.clone());
+                let _ = cfg.overlay_tx.send(overlay_state.clone());
             }
         }
 
@@ -188,10 +295,12 @@ pub fn run() {
     }
 }
 
-fn stop_recording(
+fn do_stop_recording(
     audio: &mut audio::AudioCapture,
     to_backend: &crossbeam_channel::Sender<Vec<u8>>,
     session_id: Option<uuid::Uuid>,
+    overlay_tx: &Sender<OverlayState>,
+    overlay_state: &mut OverlayState,
 ) {
     audio.stop();
     if let Some(sid) = session_id {
@@ -200,8 +309,20 @@ fn stop_recording(
             let _ = to_backend.send(data);
         }
     }
+    let state_clone = overlay_state.clone();
+    update_overlay_fn(
+        overlay_tx,
+        overlay_state,
+        OverlayState {
+            is_visible: true,
+            is_recording: false,
+            is_processing: true,
+            ..state_clone
+        },
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_backend_message(
     msg: BackendMessage,
     current_session_id: &mut Option<uuid::Uuid>,
@@ -210,6 +331,7 @@ fn handle_backend_message(
     injector: &mut injection::DefaultTextInjector,
     overlay_tx: &crossbeam_channel::Sender<OverlayState>,
     overlay_state: &mut OverlayState,
+    state_tx: &crossbeam_channel::Sender<AppState>,
 ) {
     match msg {
         BackendMessage::SessionStarted { session_id } => {
@@ -264,22 +386,22 @@ fn handle_backend_message(
             }
             injector.restore_clipboard();
 
-            let state = overlay_state.clone();
-            let overlay_tx_clone = overlay_tx.clone();
+            let _ = state_tx.send(AppState::Idle);
+
+            let s = overlay_state.clone();
+            let tx = overlay_tx.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(1500));
-                let _ = overlay_tx_clone.send(OverlayState {
+                let _ = tx.send(OverlayState {
                     is_visible: false,
-                    ..state
+                    ..s
                 });
             });
         }
         BackendMessage::ProcessingStatus {
             session_id: _,
             stage: _,
-        } => {
-            // Status updates during processing
-        }
+        } => {}
         BackendMessage::Error {
             code: _,
             message,
@@ -299,7 +421,7 @@ fn stream_audio(
     sample_rate: u32,
     channels: u16,
 ) {
-    let chunk_size = (sample_rate as usize / 50).max(160); // 20ms chunks
+    let chunk_size = (sample_rate as usize / 50).max(160);
     let mut buf = Vec::with_capacity(chunk_size);
 
     loop {
@@ -334,7 +456,6 @@ fn stream_audio(
         }
 
         if buf.is_empty() && consumer.is_empty() {
-            // Check if the session ended (consumer will be dropped by AudioCapture::stop)
             std::thread::sleep(Duration::from_millis(5));
         }
     }

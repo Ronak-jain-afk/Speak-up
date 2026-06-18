@@ -1,15 +1,63 @@
-use speak_up_core::Settings;
+use std::io::Write;
+use std::path::PathBuf;
 
-#[allow(dead_code)]
-const SETTINGS_PATH: &str = "~/.config/speak-up/settings.json";
+use serde::{Deserialize, Serialize};
+use speak_up_core::*;
 
-pub fn load_settings() -> Settings {
-    unimplemented!("Phase 7")
+fn config_dir() -> PathBuf {
+    if let Some(dir) = dirs::config_dir() {
+        dir.join("speak-up")
+    } else {
+        PathBuf::from("~/.config/speak-up")
+    }
 }
 
-pub fn save_settings(settings: &Settings) -> Result<(), SettingsError> {
-    let _ = settings;
-    unimplemented!("Phase 7")
+fn settings_path() -> PathBuf {
+    config_dir().join("settings.json")
+}
+
+fn ensure_config_dir() -> std::io::Result<()> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir)
+}
+
+pub fn load_settings_from_disk() -> Settings {
+    let path = settings_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Failed to parse settings ({}), using defaults", e);
+                default_settings()
+            }
+        },
+        Err(_) => {
+            tracing::info!("No settings file found, using defaults");
+            default_settings()
+        }
+    }
+}
+
+pub fn save_settings_to_disk(settings: &Settings) -> Result<(), String> {
+    let path = settings_path();
+    ensure_config_dir().map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let tmp_path = path.with_extension("json.tmp");
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+
+    let mut file =
+        std::fs::File::create(&tmp_path).map_err(|e| format!("Failed to write temp file: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write content: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync: {}", e))?;
+
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| format!("Failed to rename temp file: {}", e))?;
+
+    tracing::info!("Settings saved to {}", path.display());
+    Ok(())
 }
 
 pub fn default_settings() -> Settings {
@@ -44,9 +92,26 @@ pub fn default_settings() -> Settings {
     }
 }
 
-#[derive(Debug)]
-pub enum SettingsError {
-    Read(String),
-    Write(String),
-    Parse(String),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn load_settings_cmd() -> Result<Settings, String> {
+    Ok(load_settings_from_disk())
+}
+
+#[tauri::command]
+pub fn save_settings_cmd(settings: Settings) -> Result<(), String> {
+    save_settings_to_disk(&settings)
+}
+
+#[tauri::command]
+pub fn get_audio_devices_cmd() -> Vec<DeviceInfo> {
+    crate::audio::AudioCapture::enumerate_devices()
+        .into_iter()
+        .map(|d| DeviceInfo { id: d.id, name: d.name })
+        .collect()
 }

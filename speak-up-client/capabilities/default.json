@@ -3,6 +3,10 @@
   "description": "Default permissions for Speak Up",
   "windows": ["*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-center"
   ]
 }

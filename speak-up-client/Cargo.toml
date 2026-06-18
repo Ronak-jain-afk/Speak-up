@@ -8,7 +8,7 @@ license.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 egui = "0.30"
 egui-winit = "0.30"
@@ -37,3 +37,4 @@ x11rb = "0.13"
 speak-up-core.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
+dirs = "6"

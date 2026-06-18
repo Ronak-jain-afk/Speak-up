@@ -3,13 +3,303 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Speak Up — Settings</title>
+  <title>Speak Up - Settings</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2em; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 0;
+    }
+    .container { max-width: 680px; margin: 0 auto; padding: 32px 24px 80px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 24px; letter-spacing: -0.01em; }
+    h2 {
+      font-size: 15px; font-weight: 600; margin-bottom: 12px;
+      padding-bottom: 6px; border-bottom: 1px solid #e0e0e0;
+    }
+    .section { margin-bottom: 28px; }
+    .field { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; min-height: 36px; }
+    .field label { font-size: 13px; color: #333; flex-shrink: 0; margin-right: 12px; }
+    .field input[type="text"], .field input[type="password"], .field select {
+      font-size: 13px; padding: 5px 10px; border: 1px solid #ccc;
+      border-radius: 6px; background: #fff; width: 200px; outline: none;
+    }
+    .field input[type="text"]:focus, .field input[type="password"]:focus, .field select:focus {
+      border-color: #0071e3; box-shadow: 0 0 0 2px rgba(0,113,227,0.2);
+    }
+    .field input[type="range"] { width: 140px; }
+    .field .range-value { font-size: 12px; color: #666; min-width: 32px; text-align: right; }
+    .toggle { position: relative; width: 40px; height: 22px; cursor: pointer; }
+    .toggle input { display: none; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: #ccc; border-radius: 11px;
+      transition: background 0.15s;
+    }
+    .toggle .slider::after {
+      content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+      background: #fff; border-radius: 50%; transition: transform 0.15s;
+    }
+    .toggle input:checked + .slider { background: #0071e3; }
+    .toggle input:checked + .slider::after { transform: translateX(18px); }
+    .btn {
+      padding: 8px 20px; border: none; border-radius: 8px; font-size: 13px;
+      font-weight: 500; cursor: pointer; transition: background 0.15s;
+    }
+    .btn-primary { background: #0071e3; color: #fff; }
+    .btn-primary:hover { background: #0060c0; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:hover { background: #d0d0d0; }
+    .status { text-align: center; padding: 8px; border-radius: 6px; font-size: 12px; margin-top: 12px; display: none; }
+    .status.success { display: block; background: #d4edda; color: #155724; }
+    .status.error { display: block; background: #f8d7da; color: #721c24; }
+    .save-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(8px); padding: 12px 24px; border-top: 1px solid #e0e0e0;
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .desc { font-size: 11px; color: #888; }
+    .provider-card {
+      background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 12px; margin-bottom: 8px;
+    }
+    .provider-card .field { padding: 4px 0; }
+    .inline-label { font-size: 12px; color: #555; min-width: 90px; }
   </style>
 </head>
 <body>
-  <h1>Speak Up</h1>
-  <p>Settings UI — coming in Phase 7.</p>
+<div class="container">
+  <h1>Speak Up Settings</h1>
+  <div id="status" class="status"></div>
+
+  <div class="section">
+    <h2>General</h2>
+    <div class="field">
+      <label>Launch at startup</label>
+      <label class="toggle"><input type="checkbox" id="launch_at_startup"><span class="slider"></span></label>
+    </div>
+    <div class="field">
+      <label>Sound feedback</label>
+      <label class="toggle"><input type="checkbox" id="sound_feedback"><span class="slider"></span></label>
+    </div>
+    <div class="field">
+      <label>Auto-mute while recording</label>
+      <label class="toggle"><input type="checkbox" id="auto_mute"><span class="slider"></span></label>
+    </div>
+    <div class="field">
+      <label>Overlay position</label>
+      <select id="overlay_position">
+        <option value="NearCursor">Near cursor</option>
+        <option value="BottomRight">Bottom right</option>
+        <option value="TopRight">Top right</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>History retention (days)</label>
+      <input type="text" id="history_retention_days" value="30">
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Microphone</h2>
+    <div class="field">
+      <label>Device</label>
+      <select id="mic_device"></select>
+    </div>
+    <div class="field">
+      <label>Noise gate threshold</label>
+      <div class="row">
+        <input type="range" id="noise_gate" min="0" max="0.1" step="0.005" value="0.02">
+        <span class="range-value" id="noise_gate_val">0.02</span>
+      </div>
+    </div>
+    <div class="desc">Adjust this if background noise triggers false starts.</div>
+  </div>
+
+  <div class="section">
+    <h2>Hotkeys</h2>
+    <div class="field">
+      <label>Hold/toggle to record</label>
+      <input type="text" id="hk_record" value="Ctrl+Shift+Space">
+    </div>
+    <div class="field">
+      <label>Stop recording</label>
+      <input type="text" id="hk_stop" value="Ctrl+Shift+M">
+    </div>
+    <div class="field">
+      <label>Re-type last</label>
+      <input type="text" id="hk_retype" value="Ctrl+Shift+V">
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Speech-to-Text Provider</h2>
+    <div class="provider-card" id="asr_card">
+      <div class="field">
+        <span class="inline-label">Type</span>
+        <select id="asr_type">
+          <option value="">None (local default)</option>
+          <option value="LocalWhisper">Local Whisper</option>
+          <option value="OpenAIWhisper">OpenAI Whisper API</option>
+          <option value="Deepgram">Deepgram</option>
+        </select>
+      </div>
+      <div class="field" id="asr_api_key_field" style="display:none">
+        <span class="inline-label">API key</span>
+        <input type="password" id="asr_api_key" placeholder="sk-...">
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>AI Cleanup Provider</h2>
+    <div class="provider-card" id="cleaner_card">
+      <div class="field">
+        <span class="inline-label">Type</span>
+        <select id="cleaner_type">
+          <option value="">None (raw transcript only)</option>
+          <option value="LocalLLM">Local LLM</option>
+          <option value="OpenAICleaner">OpenAI</option>
+          <option value="AnthropicCleaner">Anthropic</option>
+        </select>
+      </div>
+      <div class="field" id="cleaner_api_key_field" style="display:none">
+        <span class="inline-label">API key</span>
+        <input type="password" id="cleaner_api_key" placeholder="sk-...">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="save-bar">
+  <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+  <button class="btn btn-primary" id="saveBtn" onclick="saveSettings()">Save</button>
+</div>
+
+<script>
+  const { invoke } = window.__TAURI__ ? window.__TAURI__.core : {};
+
+  async function loadSettings() {
+    if (!invoke) return;
+    try {
+      const s = await invoke('load_settings_cmd');
+      document.getElementById('launch_at_startup').checked = s.general.launch_at_startup;
+      document.getElementById('sound_feedback').checked = s.general.sound_feedback;
+      document.getElementById('auto_mute').checked = s.general.auto_mute;
+      document.getElementById('overlay_position').value = s.general.overlay_position;
+      document.getElementById('history_retention_days').value = s.general.history_retention_days;
+      document.getElementById('noise_gate').value = s.microphone.noise_gate_threshold;
+      document.getElementById('noise_gate_val').textContent = Number(s.microphone.noise_gate_threshold).toFixed(3);
+      document.getElementById('hk_record').value = s.hotkeys.hold_to_record;
+      document.getElementById('hk_stop').value = s.hotkeys.toggle_mic;
+      document.getElementById('hk_retype').value = s.hotkeys.retype_last;
+
+      if (s.asr_provider) {
+        document.getElementById('asr_type').value = s.asr_provider.provider_type;
+        toggleApiKey('asr', s.asr_provider.provider_type);
+        if (s.asr_provider.settings && s.asr_provider.settings.api_key) {
+          document.getElementById('asr_api_key').value = s.asr_provider.settings.api_key;
+        }
+      }
+      if (s.cleaner_provider) {
+        document.getElementById('cleaner_type').value = s.cleaner_provider.provider_type;
+        toggleApiKey('cleaner', s.cleaner_provider.provider_type);
+        if (s.cleaner_provider.settings && s.cleaner_provider.settings.api_key) {
+          document.getElementById('cleaner_api_key').value = s.cleaner_provider.settings.api_key;
+        }
+      }
+
+      const devices = await invoke('get_audio_devices_cmd');
+      const sel = document.getElementById('mic_device');
+      sel.innerHTML = '<option value="">Default</option>';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id; opt.textContent = d.name;
+        if (s.microphone.device_id === d.id) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      showStatus('Failed to load settings: ' + e, false);
+    }
+  }
+
+  async function saveSettings() {
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = true; btn.textContent = 'Saving...';
+    try {
+      const asrProvider = buildProvider('asr');
+      const cleanerProvider = buildProvider('cleaner');
+      await invoke('save_settings_cmd', {
+        settings: {
+          version: '0.1.0',
+          microphone: {
+            device_id: document.getElementById('mic_device').value || null,
+            noise_gate_threshold: parseFloat(document.getElementById('noise_gate').value)
+          },
+          hotkeys: {
+            hold_to_record: document.getElementById('hk_record').value,
+            toggle_mic: document.getElementById('hk_stop').value,
+            retype_last: document.getElementById('hk_retype').value
+          },
+          asr_provider: asrProvider,
+          cleaner_provider: cleanerProvider,
+          profiles: [],
+          dictionary: [],
+          general: {
+            launch_at_startup: document.getElementById('launch_at_startup').checked,
+            sound_feedback: document.getElementById('sound_feedback').checked,
+            auto_mute: document.getElementById('auto_mute').checked,
+            overlay_position: document.getElementById('overlay_position').value,
+            history_retention_days: parseInt(document.getElementById('history_retention_days').value) || 30
+          }
+        }
+      });
+      showStatus('Settings saved successfully.', true);
+    } catch (e) {
+      showStatus('Failed to save: ' + e, false);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save';
+    }
+  }
+
+  function buildProvider(prefix) {
+    const type = document.getElementById(prefix + '_type').value;
+    if (!type) return null;
+    const apiKey = document.getElementById(prefix + '_api_key').value;
+    const needsKey = ['OpenAIWhisper', 'Deepgram', 'OpenAICleaner', 'AnthropicCleaner'].includes(type);
+    return {
+      provider_type: type,
+      name: type,
+      settings: needsKey ? { api_key: apiKey } : {}
+    };
+  }
+
+  function toggleApiKey(prefix, type) {
+    const needsKey = ['OpenAIWhisper', 'Deepgram', 'OpenAICleaner', 'AnthropicCleaner'].includes(type);
+    document.getElementById(prefix + '_api_key_field').style.display = needsKey ? '' : 'none';
+  }
+
+  function showStatus(msg, ok) {
+    const el = document.getElementById('status');
+    el.textContent = msg; el.className = 'status ' + (ok ? 'success' : 'error');
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+
+  document.getElementById('asr_type').addEventListener('change', function() {
+    toggleApiKey('asr', this.value);
+  });
+  document.getElementById('cleaner_type').addEventListener('change', function() {
+    toggleApiKey('cleaner', this.value);
+  });
+  document.getElementById('noise_gate').addEventListener('input', function() {
+    document.getElementById('noise_gate_val').textContent = Number(this.value).toFixed(3);
+  });
+  document.addEventListener('DOMContentLoaded', loadSettings);
+</script>
 </body>
 </html>

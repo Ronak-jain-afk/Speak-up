@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default permissions for Speak Up","local":true,"windows":["*"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default permissions for Speak Up","local":true,"windows":["*"],"permissions":["core:default","core:window:default","core:window:allow-close","core:window:allow-set-focus","core:window:allow-center"]}}
