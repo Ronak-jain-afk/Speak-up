@@ -34,10 +34,10 @@ tracing-subscriber.workspace = true
 arboard = "3"
 keyring = "3"
 device_query = "2"
+uuid.workspace = true
+dirs = "6"
 speak-up-core.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = "0.13"
-uuid.workspace = true
 anyhow.workspace = true
-dirs = "6"
