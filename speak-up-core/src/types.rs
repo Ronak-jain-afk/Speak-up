@@ -46,7 +46,7 @@ pub struct ProviderConfig {
     pub settings: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ProviderType {
     LocalWhisper,
     OpenAIWhisper,
@@ -89,10 +89,31 @@ pub struct Settings {
     pub general: GeneralSettings,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            version: "0.1.0".into(),
+            microphone: MicrophoneSettings::default(),
+            hotkeys: HotkeySettings::default(),
+            asr_provider: None,
+            cleaner_provider: None,
+            profiles: Vec::new(),
+            dictionary: Vec::new(),
+            general: GeneralSettings::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MicrophoneSettings {
     pub device_id: Option<String>,
     pub noise_gate_threshold: f32,
+}
+
+impl Default for MicrophoneSettings {
+    fn default() -> Self {
+        Self { device_id: None, noise_gate_threshold: 0.02 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +121,16 @@ pub struct HotkeySettings {
     pub hold_to_record: String,
     pub toggle_mic: String,
     pub retype_last: String,
+}
+
+impl Default for HotkeySettings {
+    fn default() -> Self {
+        Self {
+            hold_to_record: "Ctrl+Shift+Space".into(),
+            toggle_mic: "Ctrl+Shift+M".into(),
+            retype_last: "Ctrl+Shift+V".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,8 +148,21 @@ pub struct GeneralSettings {
     pub history_retention_days: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            launch_at_startup: false,
+            sound_feedback: true,
+            auto_mute: false,
+            overlay_position: OverlayPosition::default(),
+            history_retention_days: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum OverlayPosition {
+    #[default]
     NearCursor,
     BottomRight,
     TopRight,

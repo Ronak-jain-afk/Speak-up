@@ -111,6 +111,7 @@ async fn handle_connection(
                 send_message(&msg_tx, &processing).await;
 
                 let tx = msg_tx.clone();
+                let sm = session_manager.clone();
                 match session_manager.finalize_session(session_id).await {
                     Some((mut events_rx, task)) => {
                         tokio::spawn(async move {
@@ -126,21 +127,42 @@ async fn handle_connection(
                                 }
                             }
 
-                            let result = task.await.unwrap_or_else(|_| {
-                                tracing::error!("Transcription task failed for {}", session_id);
-                                crate::asr::TranscriptResult {
-                                    segments: Vec::new(),
-                                    full_text: String::new(),
+                            let raw_text = match task.await {
+                                Ok(result) => result.full_text,
+                                Err(_) => {
+                                    tracing::error!("Transcription task failed for {}", session_id);
+                                    String::new()
                                 }
-                            });
-
-                            let transcript = BackendMessage::FinalTranscript {
-                                session_id,
-                                raw_text: result.full_text.clone(),
-                                cleaned_text: result.full_text,
                             };
-                            if let Ok(data) = bincode::serialize(&transcript) {
-                                let _ = tx.send(data).await;
+
+                            if !raw_text.is_empty() {
+                                let status_msg = BackendMessage::ProcessingStatus {
+                                    session_id,
+                                    stage: speak_up_core::ipc::ProcessingStage::Cleaning,
+                                };
+                                if let Ok(data) = bincode::serialize(&status_msg) {
+                                    let _ = tx.send(data).await;
+                                }
+
+                                let cleaned_text = sm.clean_transcript(&raw_text).await;
+
+                                let transcript = BackendMessage::FinalTranscript {
+                                    session_id,
+                                    raw_text: raw_text.clone(),
+                                    cleaned_text,
+                                };
+                                if let Ok(data) = bincode::serialize(&transcript) {
+                                    let _ = tx.send(data).await;
+                                }
+                            } else {
+                                let transcript = BackendMessage::FinalTranscript {
+                                    session_id,
+                                    raw_text: String::new(),
+                                    cleaned_text: String::new(),
+                                };
+                                if let Ok(data) = bincode::serialize(&transcript) {
+                                    let _ = tx.send(data).await;
+                                }
                             }
 
                             let done = BackendMessage::ProcessingStatus {
@@ -164,22 +186,39 @@ async fn handle_connection(
 
             ClientMessage::ReconfigureProvider {
                 provider_type,
-                config: _,
+                config,
             } => {
-                tracing::warn!(
-                    "Provider reconfiguration not implemented in MVP: {:?}",
-                    provider_type
-                );
-                let response = BackendMessage::ProviderSwitched {
+                let cfg = speak_up_core::ProviderConfig {
                     provider_type,
-                    success: false,
-                    error: Some("Not implemented in MVP".into()),
+                    name: config.name,
+                    settings: config.settings,
                 };
-                send_message(&msg_tx, &response).await;
+                match session_manager
+                    .provider_manager()
+                    .switch_cleaner(&cfg)
+                    .await
+                {
+                    Ok(()) => {
+                        let response = BackendMessage::ProviderSwitched {
+                            provider_type,
+                            success: true,
+                            error: None,
+                        };
+                        send_message(&msg_tx, &response).await;
+                    }
+                    Err(e) => {
+                        let response = BackendMessage::ProviderSwitched {
+                            provider_type,
+                            success: false,
+                            error: Some(e),
+                        };
+                        send_message(&msg_tx, &response).await;
+                    }
+                }
             }
 
             ClientMessage::ReloadSettings => {
-                tracing::info!("Settings reload requested (no-op in MVP)");
+                tracing::info!("Settings reload requested");
             }
 
             ClientMessage::QueryHistory { .. } => {

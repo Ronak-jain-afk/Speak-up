@@ -6,11 +6,16 @@ use uuid::Uuid;
 use speak_up_core::{AppContext, AudioChunk, DictationSession, SessionStatus};
 
 use crate::asr::{ASREngine, ASRConfig};
+use crate::profiles::ProfileManager;
+use crate::dictionary::DictionaryManager;
+use crate::providers::ProviderManager;
 
-#[derive(Clone)]
 pub struct SessionManager {
     sessions: Arc<RwLock<HashMap<Uuid, SessionState>>>,
     asr_engine: Arc<RwLock<Box<dyn ASREngine + Send + Sync>>>,
+    provider_mgr: Arc<ProviderManager>,
+    profile_mgr: Arc<RwLock<ProfileManager>>,
+    dict_mgr: Arc<DictionaryManager>,
 }
 
 struct SessionState {
@@ -22,11 +27,21 @@ struct SessionState {
 }
 
 impl SessionManager {
-    pub fn new(asr_engine: Box<dyn ASREngine + Send + Sync>) -> Self {
+    pub fn new(
+        asr_engine: Box<dyn ASREngine + Send + Sync>,
+        provider_mgr: Arc<ProviderManager>,
+    ) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             asr_engine: Arc::new(RwLock::new(asr_engine)),
+            provider_mgr,
+            profile_mgr: Arc::new(RwLock::new(ProfileManager::new())),
+            dict_mgr: Arc::new(DictionaryManager::new()),
         }
+    }
+
+    pub fn provider_manager(&self) -> &Arc<ProviderManager> {
+        &self.provider_mgr
     }
 
     pub async fn create_session(&self, context: AppContext) -> Uuid {
@@ -70,7 +85,10 @@ impl SessionManager {
     pub async fn finalize_session(
         &self,
         session_id: Uuid,
-    ) -> Option<(mpsc::Receiver<super::asr::TranscriptEvent>, tokio::task::JoinHandle<super::asr::TranscriptResult>)> {
+    ) -> Option<(
+        mpsc::Receiver<super::asr::TranscriptEvent>,
+        tokio::task::JoinHandle<super::asr::TranscriptResult>,
+    )> {
         let session_state = {
             let mut sessions = self.sessions.write().await;
             sessions.remove(&session_id)
@@ -101,19 +119,26 @@ impl SessionManager {
         Some((events_rx, task))
     }
 
-    pub async fn handle_transcript_result(
+    pub async fn clean_transcript(
         &self,
-        session_id: Uuid,
-        result: super::asr::TranscriptResult,
-    ) {
-        let mut sessions = self.sessions.write().await;
-        if let Some(state) = sessions.get_mut(&session_id) {
-            state.session.status = SessionStatus::Done;
+        raw_text: &str,
+    ) -> String {
+        let profile = {
+            let mgr = self.profile_mgr.read().await;
+            mgr.get_fallback()
+        };
+        let dictionary = self.dict_mgr.get_all().await;
+
+        let cleaner = self.provider_mgr.get_cleaner().await;
+        match cleaner.clean(raw_text, &profile, &dictionary) {
+            Ok(cleaned) => {
+                tracing::debug!("Transcript cleaned: {} -> {}", raw_text, cleaned);
+                cleaned
+            }
+            Err(e) => {
+                tracing::error!("Cleaner failed: {}, using raw transcript", e);
+                raw_text.to_string()
+            }
         }
-        tracing::info!(
-            "Session {} completed: {}",
-            session_id,
-            result.full_text
-        );
     }
 }

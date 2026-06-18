@@ -26,7 +26,23 @@ impl ProfileManager {
             "generic".into(),
             Profile {
                 name: "generic".into(),
-                system_prompt_template: "Clean up the transcript.".into(),
+                system_prompt_template: "Clean up the transcript naturally.".into(),
+                client_post_process: vec![],
+            },
+        );
+        profiles.insert(
+            "email".into(),
+            Profile {
+                name: "email".into(),
+                system_prompt_template: "Format as a professional email. Add appropriate salutation and closing if the transcript suggests one.".into(),
+                client_post_process: vec![],
+            },
+        );
+        profiles.insert(
+            "code".into(),
+            Profile {
+                name: "code".into(),
+                system_prompt_template: "Preserve code identifiers and syntax exactly as spoken. Add line breaks only where indicated. Do not fix code syntax.".into(),
                 client_post_process: vec![],
             },
         );
@@ -34,6 +50,17 @@ impl ProfileManager {
     }
 
     pub fn match_profile(&self, _context: &AppContext) -> Option<&Profile> {
-        unimplemented!("Phase 10")
+        None
+    }
+
+    pub fn get_fallback(&self) -> Profile {
+        self.profiles
+            .get("generic")
+            .cloned()
+            .unwrap_or_else(|| Profile {
+                name: "generic".into(),
+                system_prompt_template: "Clean up the transcript.".into(),
+                client_post_process: vec![],
+            })
     }
 }
