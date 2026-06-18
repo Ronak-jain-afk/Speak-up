@@ -277,7 +277,7 @@ mod local_whisper_impl {
                 let result = tokio::task::block_in_place(|| {
                     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
                     params.set_n_threads(n_threads);
-                    params.set_language(language.as_deref().unwrap_or("en"));
+                    params.set_language(Some(language.as_deref().unwrap_or("en")));
                     params.set_translate(false);
                     params.set_print_progress(false);
                     params.set_print_realtime(false);
@@ -308,11 +308,13 @@ mod local_whisper_impl {
 
                     let mut full_text = String::new();
                     for i in 0..num_segments {
-                        if let Ok(text) = state.full_get_segment_text(i) {
-                            if !full_text.is_empty() {
-                                full_text.push(' ');
+                        if let Some(segment) = state.get_segment(i) {
+                            if let Ok(text) = segment.to_str() {
+                                if !full_text.is_empty() {
+                                    full_text.push(' ');
+                                }
+                                full_text.push_str(text.trim());
                             }
-                            full_text.push_str(text.trim());
                         }
                     }
 
