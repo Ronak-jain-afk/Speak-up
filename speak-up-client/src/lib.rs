@@ -114,22 +114,25 @@ pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     });
 
     let app_handle = app.handle().clone();
-    std::thread::spawn(move || {
-        let tray_ctx = match tray::build_tray(&app_handle, tray_cmd_tx) {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!("Failed to build tray: {:?}", e);
-                return;
-            }
-        };
-        let mut current_state = AppState::Idle;
-        while let Ok(new_state) = state_rx.recv() {
-            if new_state != current_state {
-                current_state = new_state;
-                tray::update_tray_label(&tray_ctx, current_state);
-            }
+    let tray_ctx = match tray::build_tray(&app_handle, tray_cmd_tx) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            tracing::error!("Failed to build tray: {:?}", e);
+            None
         }
-    });
+    };
+
+    if let Some(tray_ctx) = tray_ctx {
+        std::thread::spawn(move || {
+            let mut current_state = AppState::Idle;
+            while let Ok(new_state) = state_rx.recv() {
+                if new_state != current_state {
+                    current_state = new_state;
+                    tray::update_tray_label(&tray_ctx, current_state);
+                }
+            }
+        });
+    }
 
     Ok(())
 }
