@@ -145,6 +145,7 @@ pub struct MainLoopConfig {
 }
 
 fn register_hotkeys(hotkey_mgr: &mut hotkeys::HotkeyManager, settings: &speak_up_core::Settings) {
+    tracing::info!("Registering hotkeys: record='{}', stop='{}', retype='{}'", settings.hotkeys.hold_to_record, settings.hotkeys.toggle_mic, settings.hotkeys.retype_last);
     hotkey_mgr.unregister_all();
     if let Err(e) = hotkey_mgr.register(&settings.hotkeys.hold_to_record, HotkeyAction::ToggleRecording) {
         tracing::warn!("Failed to register record hotkey '{}': {:?}", settings.hotkeys.hold_to_record, e);

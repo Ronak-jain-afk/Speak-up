@@ -36,6 +36,7 @@ impl HotkeyManager {
             .map_err(|e| HotkeyError::RegistrationFailed(e.to_string()))?;
         self.action_map.insert(id, action);
         self.registered.push((combo.to_string(), action));
+        tracing::debug!("Registered hotkey '{}' -> id={} action={:?}", combo, id, action);
         Ok(())
     }
 
@@ -50,8 +51,12 @@ impl HotkeyManager {
 
     pub fn poll_event(&mut self) -> Option<HotkeyAction> {
         while let Ok(event) = self.receiver.try_recv() {
+            tracing::debug!("Hotkey event received: id={}", event.id());
             if let Some(action) = self.action_map.get(&event.id()) {
+                tracing::info!("Hotkey matched: {:?}", action);
                 return Some(*action);
+            } else {
+                tracing::warn!("Hotkey with id {} not in action map (keys: {:?})", event.id(), self.action_map.keys().collect::<Vec<_>>());
             }
         }
         None
