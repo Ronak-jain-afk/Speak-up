@@ -183,6 +183,16 @@ pub enum HotkeyError {
     RegistrationFailed(String),
 }
 
+impl std::fmt::Display for HotkeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HotkeyError::RegistrationFailed(msg) => write!(f, "Hotkey registration failed: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for HotkeyError {}
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]

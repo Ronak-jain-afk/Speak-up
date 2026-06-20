@@ -104,12 +104,17 @@ pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         overlay::run_overlay_loop(overlay_cfg, overlay_rx);
     });
 
+    // Create HotkeyManager on the main thread (required on Windows for win32 event loop)
+    let hotkey_manager = hotkeys::HotkeyManager::new()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
     std::thread::spawn(move || {
         run_main_loop(MainLoopConfig {
             overlay_tx,
             tray_cmd_rx,
             state_tx,
             backend_port: default_port,
+            hotkey_manager,
         });
     });
 
@@ -142,6 +147,7 @@ pub struct MainLoopConfig {
     pub tray_cmd_rx: Receiver<TrayCommand>,
     pub state_tx: Sender<AppState>,
     pub backend_port: u16,
+    pub hotkey_manager: hotkeys::HotkeyManager,
 }
 
 fn register_hotkeys(hotkey_mgr: &mut hotkeys::HotkeyManager, settings: &speak_up_core::Settings) {
@@ -167,13 +173,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
         }
     };
 
-    let mut hotkey_mgr = match hotkeys::HotkeyManager::new() {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::error!("Hotkey init failed: {:?}", e);
-            return;
-        }
-    };
+    let mut hotkey_mgr = cfg.hotkey_manager;
     register_hotkeys(&mut hotkey_mgr, &crate::settings::load_settings_from_disk());
 
     let mut context_detector = context::DefaultContextDetector::new();
