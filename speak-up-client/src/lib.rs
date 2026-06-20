@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender};
+use hotkeys::HotkeyAction;
 use ringbuf::traits::{Consumer, Observer};
 use speak_up_core::ipc::{BackendMessage, ClientMessage, DictationEntry};
 use speak_up_core::AppContext;
@@ -46,8 +47,6 @@ use crate::context::ContextDetector;
 use crate::injection::TextInjector;
 use crate::overlay::OverlayState;
 use crate::tray::{AppState, TrayCommand};
-
-use hotkeys::HotkeyAction;
 
 static RELOAD_SETTINGS_TX: OnceLock<Sender<()>> = OnceLock::new();
 static BACKEND_REQ_TX: OnceLock<Sender<BackendRequest>> = OnceLock::new();
@@ -104,17 +103,12 @@ pub fn setup_tauri(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         overlay::run_overlay_loop(overlay_cfg, overlay_rx);
     });
 
-    // Create HotkeyManager on the main thread (required on Windows for win32 event loop)
-    let hotkey_manager = hotkeys::HotkeyManager::new()
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
     std::thread::spawn(move || {
         run_main_loop(MainLoopConfig {
             overlay_tx,
             tray_cmd_rx,
             state_tx,
             backend_port: default_port,
-            hotkey_manager,
         });
     });
 
@@ -147,7 +141,6 @@ pub struct MainLoopConfig {
     pub tray_cmd_rx: Receiver<TrayCommand>,
     pub state_tx: Sender<AppState>,
     pub backend_port: u16,
-    pub hotkey_manager: hotkeys::HotkeyManager,
 }
 
 fn register_hotkeys(hotkey_mgr: &mut hotkeys::HotkeyManager, settings: &speak_up_core::Settings) {
@@ -164,6 +157,39 @@ fn register_hotkeys(hotkey_mgr: &mut hotkeys::HotkeyManager, settings: &speak_up
     }
 }
 
+/// Spawns a dedicated thread that owns the HotkeyManager, pumps the win32 message
+/// loop (required on Windows), and forwards hotkey actions to the main loop.
+fn spawn_hotkey_thread(action_tx: Sender<HotkeyAction>) -> Sender<()> {
+    let (reload_tx, reload_rx) = crossbeam_channel::unbounded::<()>();
+    std::thread::spawn(move || {
+        let mut mgr = match hotkeys::HotkeyManager::new() {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("HotkeyManager init failed: {:?}", e);
+                return;
+            }
+        };
+        register_hotkeys(&mut mgr, &crate::settings::load_settings_from_disk());
+
+        loop {
+            // On Windows we need to pump messages for the hidden hotkey window.
+            // Use a short sleep here; PeekMessageW integration can be added later.
+            std::thread::sleep(Duration::from_millis(8));
+
+            if let Some(action) = mgr.poll_event() {
+                let _ = action_tx.send(action);
+            }
+
+            // Check for reload signal
+            if reload_rx.try_recv().is_ok() {
+                tracing::info!("Reloading hotkeys on hotkey thread");
+                register_hotkeys(&mut mgr, &crate::settings::load_settings_from_disk());
+            }
+        }
+    });
+    reload_tx
+}
+
 fn run_main_loop(cfg: MainLoopConfig) {
     let backend = match backend::BackendClient::spawn_and_connect(cfg.backend_port) {
         Ok(b) => b,
@@ -173,8 +199,11 @@ fn run_main_loop(cfg: MainLoopConfig) {
         }
     };
 
-    let mut hotkey_mgr = cfg.hotkey_manager;
-    register_hotkeys(&mut hotkey_mgr, &crate::settings::load_settings_from_disk());
+    let (hotkey_action_tx, hotkey_action_rx) = crossbeam_channel::unbounded::<HotkeyAction>();
+
+    // Hotkey thread: creates HotkeyManager on its own thread (required for win32
+    // message pump on Windows), pumps messages, and sends actions to the main loop.
+    let hotkey_reload_tx = spawn_hotkey_thread(hotkey_action_tx);
 
     let mut context_detector = context::DefaultContextDetector::new();
     let mut audio = audio::AudioCapture::new();
@@ -206,7 +235,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
     let mut was_muted: Option<bool> = None;
 
     loop {
-        if let Some(action) = hotkey_mgr.poll_event() {
+        if let Ok(action) = hotkey_action_rx.try_recv() {
             match action {
                 HotkeyAction::ToggleRecording | HotkeyAction::StartRecording => {
                     if !recording {
@@ -383,8 +412,7 @@ fn run_main_loop(cfg: MainLoopConfig) {
             if let Ok(data) = bincode::serialize(&msg) {
                 let _ = backend.to_backend.send(data);
             }
-            let settings = crate::settings::load_settings_from_disk();
-            register_hotkeys(&mut hotkey_mgr, &settings);
+            let _ = hotkey_reload_tx.send(());
         }
 
         while let Ok(req) = backend_req_rx.try_recv() {
