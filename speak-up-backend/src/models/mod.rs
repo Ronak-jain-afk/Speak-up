@@ -24,7 +24,7 @@ pub static WHISPER_TINY: ModelSpec = ModelSpec {
     name: "whisper-tiny",
     filename: "ggml-tiny.bin",
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-    sha256: "9a2e46856fbe2f7f2c8d0b0f0e5c6d7c8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3",
+    sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
     size_mb: 75,
 };
 
@@ -32,7 +32,7 @@ pub static WHISPER_SMALL: ModelSpec = ModelSpec {
     name: "whisper-small",
     filename: "ggml-small.bin",
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-    sha256: "3c2e46856fbe2f7f2c8d0b0f0e5c6d7c8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d",
+    sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
     size_mb: 150,
 };
 
