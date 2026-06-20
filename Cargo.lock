@@ -4998,6 +4998,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wgpu",
+ "windows-sys 0.59.0",
  "winit",
  "x11rb",
 ]

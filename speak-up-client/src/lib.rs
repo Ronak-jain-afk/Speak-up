@@ -172,9 +172,22 @@ fn spawn_hotkey_thread(action_tx: Sender<HotkeyAction>) -> Sender<()> {
         register_hotkeys(&mut mgr, &crate::settings::load_settings_from_disk());
 
         loop {
-            // On Windows we need to pump messages for the hidden hotkey window.
-            // Use a short sleep here; PeekMessageW integration can be added later.
-            std::thread::sleep(Duration::from_millis(8));
+            // Pump Windows messages so the hidden hotkey window receives WM_HOTKEY.
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let mut msg = std::mem::zeroed();
+                while windows_sys::Win32::UI::WindowsAndMessaging::PeekMessageW(
+                    &mut msg,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    windows_sys::Win32::UI::WindowsAndMessaging::PM_REMOVE,
+                ) != 0
+                {
+                    windows_sys::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
+                    windows_sys::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
+                }
+            }
 
             if let Some(action) = mgr.poll_event() {
                 let _ = action_tx.send(action);
@@ -185,6 +198,10 @@ fn spawn_hotkey_thread(action_tx: Sender<HotkeyAction>) -> Sender<()> {
                 tracing::info!("Reloading hotkeys on hotkey thread");
                 register_hotkeys(&mut mgr, &crate::settings::load_settings_from_disk());
             }
+
+            // Small sleep to avoid busy-waiting on non-Windows platforms
+            #[cfg(not(target_os = "windows"))]
+            std::thread::sleep(Duration::from_millis(8));
         }
     });
     reload_tx
