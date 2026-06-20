@@ -14,7 +14,7 @@ impl WindowsContextDetector {
 
 impl ContextDetector for WindowsContextDetector {
     fn get_active_window(&self) -> Result<AppContext, ContextError> {
-        tracing::warn!("Windows context detection not implemented, using empty context");
+        tracing::debug!("Windows context detection not implemented, using empty context");
         Ok(AppContext {
             window_title: String::new(),
             executable_name: String::new(),
